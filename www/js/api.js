@@ -179,7 +179,8 @@ async function api(action, params={}){
     // monitor traffic (tahan-error: interface tak valid dilewati, tidak menggagalkan semua)
     const validSet=new Set(ifaces.map(i=>i.name));
     const srvList=servers.filter(s=>s.interface && validSet.has(s.interface));
-    const ifList=ifaces.filter(i=>i.name && i.name!==tif);
+    const excl=new Set([tif].concat(rt.exclude||[]));
+    const ifList=ifaces.filter(i=>i.name && !excl.has(i.name));
     const names=Array.from(new Set(srvList.map(s=>s.interface).concat(ifList.map(i=>i.name))));
     const trafMap=await monTraffic(rt,names);
     const srvStats=srvList.map(s=>({name:s.name, active:countBy[s.name]||0, rx_bps:(trafMap[s.interface]||{}).rx||0, tx_bps:(trafMap[s.interface]||{}).tx||0})).sort((a,b)=>b.active-a.active);
@@ -256,14 +257,15 @@ async function api(action, params={}){
 
   case 'logpengguna': {
     const rt=requireRouter();
-    const rows=(await ros(rt,'/log/print',{},{topics:'hotspot'})).reverse();
+    const rows=(await ros(rt,'/log/print')).reverse();
     const out=[];
     for(const r2 of rows){
-      const msg=r2.message||'';
+      const msg=r2.message||''; const tp=r2.topics||'';
+      if(!/hotspot/i.test(tp) && !/logged (in|out)|login|logout/i.test(msg)) continue;
       if(!/logged (in|out)|login|logout/i.test(msg)) continue;
       out.push({time:r2.time||'', message:msg});
     }
-    return out;
+    return out.slice(0,200);
   }
   case 'kick': {
     const rt=requireRouter(); const id=params.id;
@@ -404,17 +406,10 @@ async function api(action, params={}){
 
   case 'log': {
     const rt=requireRouter();
-    const rows=(await ros(rt,'/log/print',{},{topics:'hotspot'})).reverse();
-    const out=[];
-    for(const r2 of rows){
-      const msg=r2.message||''; if(msg.slice(0,2)!=='->') continue;
-      const p=msg.split(':');
-      let who,info;
-      if(p.length>6){ who=p.slice(1,7).join(':'); info=(p.slice(7,11).join(' ')).replace('trying to','').trim(); }
-      else { who=p[1]||''; info=(p.slice(2,6).join(' ')).replace('trying to','').trim(); }
-      out.push({time:r2.time||'', user:(who||'').trim(), message:info});
-    }
-    return out;
+    const rows=(await ros(rt,'/log/print')).reverse();
+    const hs=rows.filter(r=>/hotspot/i.test(r.topics||''));
+    const use=hs.length?hs:rows;
+    return use.slice(0,200).map(r=>({time:r.time||'', message:r.message||'', topics:r.topics||''}));
   }
 
   case 'cookies': {

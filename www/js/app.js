@@ -134,7 +134,6 @@ PAGES.beranda=async function(){
   view().innerHTML=`
     <div class="page-title">Beranda · ${esc(sel)}</div>
     <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"></span></h3><div id="indic"><div class="sub">memuat…</div></div></div>
-    <div class="card"><h3><span class="dot"></span> Server Hotspot</h3><div id="srvList"><div class="sub">—</div></div></div>
     <div class="card"><h3><span class="dot"></span> Interface Padat</h3><div id="ifList"><div class="sub">—</div></div></div>
     <div class="card"><h3><span class="dot"></span> 10 User Pemakaian Terbesar</h3><div id="topUsers"><div class="sub">—</div></div></div>
     <div class="grid c2 mt">
@@ -157,12 +156,11 @@ function renderHome(d){
     meterHTML('mTemp','Temperature (Health)',(d.temp||0),50,{yellow:35,red:40,display:(d.temp!=null?d.temp+'°C':'N/A')})+
     meterHTML('mData','Pemakaian Data Bulan Ini',dataGB,10000,{yellow:8000,red:9000,display:dataGB.toFixed(2)+' GB'})+
     meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
-    meterHTML('mDown','Lalu Lintas Download',0,200,{yellow:150,red:180,display:'…'})+
-    meterHTML('mUp','Lalu Lintas Upload',0,200,{yellow:150,red:180,display:'…'})+
+    meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'})+
     meterHTML('mIncM','Pendapatan Bulan ini',d.income_month,6000000,{display:money(cur,d.income_month)})+
     meterHTML('mIncD','Pendapatan Hari ini',d.income_today,300000,{yellow:200000,red:250000,display:money(cur,d.income_today)});
   }
-  renderServers(d.servers,cur); renderIfaces(d.interfaces); renderTopUsers(d.topusers);
+  renderIfaces(d.interfaces); renderTopUsers(d.topusers);
 }
 function renderServers(list,cur){
   const h=$('#srvList'); if(!h) return;
@@ -183,8 +181,8 @@ function renderTopUsers(list){ const h=$('#topUsers'); if(!h)return; if(!list||!
   h.innerHTML=list.map((u,i)=>{ const gb=(u.total||0)/1073741824;
     return `<div class="mb"><div class="kv"><span class="k">${i+1}. ${esc(u.name)}</span><span class="v">${gb.toFixed(2)} GB</span></div>${meterBar(gb,500,{yellow:400,red:450})}</div>`;
   }).join(''); }
-function startTrafficPoll(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps);
-  updateMeter('mDown',dM,200,{yellow:150,red:180,display:dM.toFixed(2)+' Mbps'}); updateMeter('mUp',uM,200,{yellow:150,red:180,display:uM.toFixed(2)+' Mbps'}); }catch(e){} };
+function startTrafficPoll(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps); const tot=dM+uM;
+  updateMeter('mTraf',tot,200,{yellow:150,red:180,display:tot.toFixed(2)+' Mbps  (↓'+dM.toFixed(1)+' ↑'+uM.toFixed(1)+')'}); }catch(e){} };
   tick(); timers.push(setInterval(tick,4000)); }
 
 /* shared active-detail list (User, Server, Mac, IP, Download, Upload, Total) + search + sort */
@@ -402,7 +400,7 @@ async function logLoad(action,render){ const b=$('#lgBody'); const c=cachePeek(a
   if(c){ render(c); } else { b.innerHTML=`<div class="loading"><span class="spin"></span></div>`; }
   try{ render(await apiCached(action,{})); }catch(e){ if(!c) b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
 function logUser(){ logLoad('logpengguna',l=>{ $('#lgBody').innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.time)}</div></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log pengguna.</div>'}</div>`; }); }
-function logHotspot(){ logLoad('log',l=>{ $('#lgBody').innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.user)}</div><span class="sub">${esc(x.time)}</span></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log.</div>'}</div>`; }); }
+function logHotspot(){ logLoad('log',l=>{ $('#lgBody').innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.time)}</div></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log. (aktifkan logging topik hotspot di MikroTik)</div>'}</div>`; }); }
 function logCookies(){ logLoad('cookies',c=>{ $('#lgBody').innerHTML=`<div class="list">${c.length?c.map(x=>`<div class="item"><div class="top"><div class="nm">${esc(x.user)}</div><button class="btn sm dang" onclick="delCookie('${esc(x.id)}')">🗑</button></div><div class="meta"><span>MAC: <b>${esc(x.mac)}</b></span><span>Exp: <b>${esc(x.expires)}</b></span></div></div>`).join(''):'<div class="empty">Tidak ada cookie.</div>'}</div>`; }); }
 
 /* ======================================================================
@@ -559,20 +557,26 @@ function routerFormHtml(r,isNew){ r=r||{}; return `
     <label class="fld"><span class="cap">Password</span><input class="input" id="rPass" type="password" value="${esc(r.pass||'')}"></label></div>
   <div class="row2"><label class="fld"><span class="cap">Mata Uang</span><input class="input" id="rCur" value="${esc(r.currency||'Rp')}"></label>
     <label class="fld"><span class="cap">Antarmuka Lalu Lintas</span><select class="input" id="rIface"><option selected>${esc(r.iface||'ether1')}</option></select></label></div>
+  <div class="fld"><span class="cap">Interface Dikecualikan dari "Interface Padat" (boleh &gt;1)</span><div class="chks" id="rExcl"><span class="sub">tekan Connect/Tes untuk memuat daftar interface…</span></div></div>
   <div class="note">Port API default 8728; lewat tunnel pakai port tunnelnya (mis. 7999). Aktifkan service <b>api</b> di MikroTik.</div>
   <div class="btnrow"><button class="btn pri" onclick="saveRouter(${isNew?'true':'false'})">💾 Simpan</button>
     <button class="btn ok" onclick="testRouter()">🔌 Connect</button><button class="btn ghost" onclick="pingRouter()">📶 Tes</button>
     ${isNew?'':`<button class="btn dang" onclick="delRouter('${esc(r.name)}')">🗑 Hapus</button>`}</div>
   <div id="rMsg" class="mt"></div>`; }
-function editRouterForm(r){ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml(r,false); fillIfaceOptions(r&&r.iface); } }
-async function fillIfaceOptions(current){ const sel=$('#rIface'); if(!sel)return; try{ const ifs=await api('interfaces'); let names=ifs.map(i=>i.name); if(current&&!names.includes(current)) names.unshift(current); sel.innerHTML=names.map(n=>`<option ${n===current?'selected':''}>${esc(n)}</option>`).join(''); }catch(e){} }
-function readRouterForm(){ return { name:($('#rName').value||'').trim(), hotspot:$('#rHot').value.trim(), host:$('#rHost').value.trim(), port:$('#rPort').value.trim()||'8728', user:$('#rUser').value.trim(), pass:$('#rPass').value, currency:$('#rCur').value.trim()||'Rp', iface:$('#rIface').value.trim() }; }
-window.newRouterForm=()=>{ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml({port:'8728',currency:'Rp',iface:'ether1'},true); fillIfaceOptions('ether1'); } };
+function editRouterForm(r){ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml(r,false); fillIfaceOptions(r&&r.iface, r&&r.exclude); } }
+async function fillIfaceOptions(current,exclude){ const sel=$('#rIface'); exclude=exclude||[];
+  try{ const ifs=await api('interfaces'); let names=ifs.map(i=>i.name); if(current&&!names.includes(current)) names.unshift(current);
+    if(sel) sel.innerHTML=names.map(n=>`<option ${n===current?'selected':''}>${esc(n)}</option>`).join('');
+    const ex=$('#rExcl'); if(ex) ex.innerHTML=names.length?names.map(n=>`<label class="chk"><input type="checkbox" value="${esc(n)}" ${exclude.includes(n)?'checked':''}> ${esc(n)}</label>`).join(''):'<span class="sub">tidak ada interface</span>';
+  }catch(e){ const ex=$('#rExcl'); if(ex&&exclude.length) ex.innerHTML=exclude.map(n=>`<label class="chk"><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>`).join(''); }
+}
+function readRouterForm(){ return { name:($('#rName').value||'').trim(), hotspot:$('#rHot').value.trim(), host:$('#rHost').value.trim(), port:$('#rPort').value.trim()||'8728', user:$('#rUser').value.trim(), pass:$('#rPass').value, currency:$('#rCur').value.trim()||'Rp', iface:$('#rIface').value.trim(), exclude:Array.from(document.querySelectorAll('#rExcl input:checked')).map(x=>x.value) }; }
+window.newRouterForm=()=>{ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml({port:'8728',currency:'Rp',iface:'ether1'},true); fillIfaceOptions('ether1',[]); } };
 window.selRouter=()=>{ Store.session=$('#setSess').value; profileCache=null; editRouterForm(currentRouter()); };
 window.saveRouter=async(isNew)=>{ const o=readRouterForm(); if(!o.name){toast('Isi Nama Sesi','err');return;} if(!o.host){toast('Isi IP/Host','err');return;}
   if(isNew && Store.routers.some(x=>x.name===o.name)){ toast('Nama sesi sudah ada','err'); return; }
   routerUpsert(o); Store.session=o.name; profileCache=null; toast('Router disimpan','ok'); await loadSessions(); subRouter(); };
 async function persistThenTest(action){ const o=readRouterForm(); if(!o.name) return {err:'Isi nama dulu'}; routerUpsert(o); Store.session=o.name; try{ return {ok:await api(action,{session:o.name})}; }catch(e){ return {err:e.message}; } }
-window.testRouter=async()=>{ const m=$('#rMsg'); m.innerHTML='<span class="spin"></span> Menghubungkan…'; const r=await persistThenTest('connect'); m.innerHTML=r.err?`<span class="pill off">✕ ${esc(r.err)}</span>`:`<span class="pill ok">✓ Connected${r.ok&&r.ok.name?' · '+esc(r.ok.name):''}</span>`; if(!r.err) await loadSessions(); };
-window.pingRouter=async()=>{ const m=$('#rMsg'); m.innerHTML='<span class="spin"></span> Mengetes…'; const r=await persistThenTest('ping'); m.innerHTML=r.err?`<span class="pill off">✕ ${esc(r.err)}</span>`:`<span class="pill ok">Terhubung · ${r.ok.ms}ms</span>`; };
+window.testRouter=async()=>{ const m=$('#rMsg'); m.innerHTML='<span class="spin"></span> Menghubungkan…'; const r=await persistThenTest('connect'); m.innerHTML=r.err?`<span class="pill off">✕ ${esc(r.err)}</span>`:`<span class="pill ok">✓ Connected${r.ok&&r.ok.name?' · '+esc(r.ok.name):''}</span>`; if(!r.err){ await loadSessions(); fillIfaceOptions($('#rIface').value, Array.from(document.querySelectorAll('#rExcl input:checked')).map(x=>x.value)); } };
+window.pingRouter=async()=>{ const m=$('#rMsg'); m.innerHTML='<span class="spin"></span> Mengetes…'; const r=await persistThenTest('ping'); m.innerHTML=r.err?`<span class="pill off">✕ ${esc(r.err)}</span>`:`<span class="pill ok">Terhubung · ${r.ok.ms}ms</span>`; if(!r.err){ fillIfaceOptions($('#rIface').value, Array.from(document.querySelectorAll('#rExcl input:checked')).map(x=>x.value)); } };
 window.delRouter=async(name)=>{ if(!confirmBox('Hapus router '+name+'?'))return; routerDelete(name); profileCache=null; toast('Dihapus','ok'); await loadSessions(); subRouter(); };
