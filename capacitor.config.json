@@ -1,0 +1,8 @@
+{
+  "appId": "net.alhudadnet.admin",
+  "appName": "ALHUDA_D.NET",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

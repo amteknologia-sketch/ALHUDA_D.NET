@@ -1,0 +1,21 @@
+{
+  "name": "alhuda-d-net",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ALHUDA_D.NET — aplikasi Android admin Hotspot MikroTik (mode langsung ke router, tanpa server)",
+  "scripts": {
+    "add:android": "cap add android",
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "build:apk": "cd android && ./gradlew assembleDebug",
+    "assets": "capacitor-assets generate --android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.1.2"
+  }
+}
