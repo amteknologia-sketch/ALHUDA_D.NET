@@ -66,6 +66,7 @@ function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
    api(action, params) — antarmuka yang dipakai seluruh halaman UI
 =================================================================== */
 async function api(action, params={}){
+  const r = (['sessions'].includes(action)) ? null : null; // router diambil per-aksi
   switch(action){
 
   case 'sessions':
@@ -125,8 +126,75 @@ async function api(action, params={}){
 
   case 'active': {
     const rt=requireRouter(); const rows=await ros(rt,'/ip/hotspot/active/print');
-    return rows.map(a=>({ id:a['.id']||'', user:a.user||'', server:a.server||'', address:a.address||'', mac:a['mac-address']||'',
-      bytes_in:+(a['bytes-in']||0), bytes_out:+(a['bytes-out']||0), uptime:a.uptime||'', login_by:a['login-by']||'', comment:a.comment||'' }));
+    return rows.map(a=>{ const bin=+(a['bytes-in']||0), bout=+(a['bytes-out']||0);
+      return { id:a['.id']||'', user:a.user||'', server:a.server||'', address:a.address||'', mac:a['mac-address']||'',
+        bytes_in:bin, bytes_out:bout, download:bout, upload:bin, total:bin+bout,
+        uptime:a.uptime||'', login_by:a['login-by']||'', comment:a.comment||'' }; });
+  }
+
+  case 'serverstats': {
+    const rt=requireRouter();
+    const a=await rosExec(rt,[
+      {command:'/ip/hotspot/print'},
+      {command:'/ip/hotspot/active/print', attrs:{'.proplist':'server'}},
+    ]);
+    const servers=a[0]||[]; const actives=a[1]||[];
+    const countBy={}; actives.forEach(x=>{ const s=x.server||'?'; countBy[s]=(countBy[s]||0)+1; });
+    const cmds=servers.map(s=>({command:'/interface/monitor-traffic', attrs:{interface:s.interface||'', once:''}}));
+    let traf=[]; if(cmds.length) traf=await rosExec(rt,cmds);
+    const list=servers.map((s,i)=>({ name:s.name||'?', interface:s.interface||'', active:countBy[s.name]||0,
+      rx_bps:+(((traf[i]||[])[0]||{})['rx-bits-per-second']||0), tx_bps:+(((traf[i]||[])[0]||{})['tx-bits-per-second']||0) }));
+    list.sort((x,y)=>y.active-x.active);
+    return list;
+  }
+
+  case 'sysinfo': {
+    const rt=requireRouter();
+    const res=await rosExec(rt,[
+      {command:'/system/identity/print'},
+      {command:'/system/resource/print'},
+      {command:'/system/routerboard/print'},
+    ]);
+    const id=res[0][0]||{}, rsc=res[1][0]||{}, rb=res[2][0]||{};
+    return { identity:id.name||'-', version:rsc.version||'-', model:rb.model||rsc['board-name']||'-',
+      cpu:(rsc['cpu-load']||'0')+'%', cpu_raw:parseInt(rsc['cpu-load']||0,10),
+      freemem:+(rsc['free-memory']||0), totalmem:+(rsc['total-memory']||0), uptime:rsc.uptime||'-',
+      freehdd:+(rsc['free-hdd-space']||0) };
+  }
+
+  case 'serverprofiles': {
+    const rt=requireRouter(); const rows=await ros(rt,'/ip/hotspot/profile/print');
+    return rows.map(p=>({ id:p['.id']||'', name:p.name||'', 'hotspot-address':p['hotspot-address']||'', 'dns-name':p['dns-name']||'',
+      'html-directory':p['html-directory']||'', 'login-by':p['login-by']||'' }));
+  }
+  case 'editserverprofile': {
+    const rt=requireRouter(); const set={'.id':params.id};
+    ['dns-name','html-directory','login-by','hotspot-address'].forEach(k=>{ if(params[k]!==undefined && params[k]!=='') set[k]=params[k]; });
+    await ros(rt,'/ip/hotspot/profile/set',set); return null;
+  }
+
+  case 'files': {
+    const rt=requireRouter(); const rows=await ros(rt,'/file/print');
+    return rows.map(f=>({ id:f['.id']||'', name:f.name||'', type:f.type||'', size:+(f.size||0) }));
+  }
+  case 'delfile': {
+    const rt=requireRouter(); await ros(rt,'/file/remove',{'.id':params.id}); return null;
+  }
+
+  case 'reboot': {
+    const rt=requireRouter(); await ros(rt,'/system/reboot'); return null;
+  }
+
+  case 'logpengguna': {
+    const rt=requireRouter();
+    const rows=(await ros(rt,'/log/print',{},{topics:'hotspot'})).reverse();
+    const out=[];
+    for(const r2 of rows){
+      const msg=r2.message||'';
+      if(!/logged (in|out)|login|logout/i.test(msg)) continue;
+      out.push({time:r2.time||'', message:msg});
+    }
+    return out;
   }
   case 'kick': {
     const rt=requireRouter(); const id=params.id;
