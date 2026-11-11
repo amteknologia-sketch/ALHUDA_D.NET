@@ -10,6 +10,7 @@ const Store = {
   get logo(){ return localStorage.getItem('ad_logo')||''; }, set logo(v){ localStorage.setItem('ad_logo',v); },
   get theme(){ return localStorage.getItem('ad_theme')||'light'; }, set theme(v){ localStorage.setItem('ad_theme',v); },
   get footer(){ return localStorage.getItem('ad_footer')||'*Garansi voucher berlaku selama voucher aktif.'; }, set footer(v){ localStorage.setItem('ad_footer',v); },
+  get vnote(){ return localStorage.getItem('ad_vnote')||'Sebelum Login :d.net Ubah Privasi ke MAC Ponsel / Perangkat'; }, set vnote(v){ localStorage.setItem('ad_vnote',v); },
   get routers(){ try{ return JSON.parse(localStorage.getItem('ad_routers')||'[]'); }catch(e){ return []; } },
   set routers(v){ localStorage.setItem('ad_routers', JSON.stringify(v)); },
 };
@@ -48,6 +49,20 @@ async function rosExec(router, commands){
 async function ros(router, command, attrs, queries){
   const res = await rosExec(router, [{ command, attrs: attrs||{}, queries: queries||{} }]);
   return res[0] || [];
+}
+// Ambil throughput beberapa interface dengan aman: jika satu nama tak valid, sisanya tetap jalan.
+async function monTraffic(router, names){
+  if(!names||!names.length) return {};
+  const map={};
+  try{
+    const res=await rosExec(router, names.map(n=>({command:'/interface/monitor-traffic',attrs:{interface:n,once:''}})));
+    names.forEach((n,i)=>{ const r=(res[i]||[])[0]||{}; map[n]={rx:+(r['rx-bits-per-second']||0), tx:+(r['tx-bits-per-second']||0)}; });
+  }catch(e){
+    await Promise.all(names.map(n=> rosExec(router,[{command:'/interface/monitor-traffic',attrs:{interface:n,once:''}}])
+      .then(res=>{ const r=(res[0]||[])[0]||{}; map[n]={rx:+(r['rx-bits-per-second']||0), tx:+(r['tx-bits-per-second']||0)}; })
+      .catch(()=>{ map[n]={rx:0,tx:0}; }) ));
+  }
+  return map;
 }
 
 /* ---------- util ---------- */
@@ -123,10 +138,12 @@ async function api(action, params={}){
 
   case 'traffic': {
     const rt=requireRouter(); let iface=params.iface||rt.iface;
+    const mon=async(ifc)=>{ const t=await ros(rt,'/interface/monitor-traffic',{interface:ifc,once:''}); return { iface:ifc, rx_bps:+((t[0]||{})['rx-bits-per-second']||0), tx_bps:+((t[0]||{})['tx-bits-per-second']||0) }; };
     if(!iface || /^\d+$/.test(iface)){ const ifs=await ros(rt,'/interface/print');
       if(/^\d+$/.test(iface)&&ifs[+iface-1]) iface=ifs[+iface-1].name; else if(ifs[0]) iface=ifs[0].name; }
-    const t=await ros(rt,'/interface/monitor-traffic',{interface:iface,once:''});
-    return { iface, rx_bps:+((t[0]||{})['rx-bits-per-second']||0), tx_bps:+((t[0]||{})['tx-bits-per-second']||0) };
+    try{ return await mon(iface); }
+    catch(e){ try{ const ifs=await ros(rt,'/interface/print'); if(ifs[0]) return await mon(ifs[0].name); }catch(_){}
+      return { iface, rx_bps:0, tx_bps:0 }; }
   }
 
   case 'active': {
@@ -159,18 +176,15 @@ async function api(action, params={}){
     const tu=users.map(u=>({name:u.name||'?', total:(+(u['bytes-in']||0))+(+(u['bytes-out']||0))})).sort((a,b)=>b.total-a.total).slice(0,10);
     const tif=rt.iface; const tifo=ifaces.find(i=>i.name===tif)||{};
     const dataBytes=(+(tifo['rx-byte']||0))+(+(tifo['tx-byte']||0));
-    // monitor traffic: per server + per interface
-    const srvList=servers.filter(s=>s.interface);
+    // monitor traffic (tahan-error: interface tak valid dilewati, tidak menggagalkan semua)
+    const validSet=new Set(ifaces.map(i=>i.name));
+    const srvList=servers.filter(s=>s.interface && validSet.has(s.interface));
     const ifList=ifaces.filter(i=>i.name && i.name!==tif);
-    const monCmds=[];
-    srvList.forEach(s=>monCmds.push({command:'/interface/monitor-traffic',attrs:{interface:s.interface,once:''}}));
-    ifList.forEach(i=>monCmds.push({command:'/interface/monitor-traffic',attrs:{interface:i.name,once:''}}));
-    const mon=monCmds.length?await rosExec(rt,monCmds):[];
-    const srvStats=srvList.map((s,idx)=>({name:s.name, active:countBy[s.name]||0,
-      rx_bps:+(((mon[idx]||[])[0]||{})['rx-bits-per-second']||0), tx_bps:+(((mon[idx]||[])[0]||{})['tx-bits-per-second']||0)})).sort((a,b)=>b.active-a.active);
-    const base=srvList.length;
-    const ifStats=ifList.map((i,idx)=>{ const rx=+(((mon[base+idx]||[])[0]||{})['rx-bits-per-second']||0), tx=+(((mon[base+idx]||[])[0]||{})['tx-bits-per-second']||0);
-      return {name:i.name, rx_bps:rx, tx_bps:tx, total:rx+tx}; }).sort((a,b)=>b.total-a.total).slice(0,5);
+    const names=Array.from(new Set(srvList.map(s=>s.interface).concat(ifList.map(i=>i.name))));
+    const trafMap=await monTraffic(rt,names);
+    const srvStats=srvList.map(s=>({name:s.name, active:countBy[s.name]||0, rx_bps:(trafMap[s.interface]||{}).rx||0, tx_bps:(trafMap[s.interface]||{}).tx||0})).sort((a,b)=>b.active-a.active);
+    const ifStats=ifList.map(i=>{ const t=trafMap[i.name]||{rx:0,tx:0}; const rb=+(i['rx-byte']||0), tb=+(i['tx-byte']||0);
+      return {name:i.name, rx_bps:t.rx, tx_bps:t.tx, total:t.rx+t.tx, bytes:rb+tb}; }).sort((a,b)=> (b.total-a.total)|| (b.bytes-a.bytes)).slice(0,5);
     return {
       device:{ boardname:rsc['board-name']||'-', model:rb.model||rsc['board-name']||'-', version:rsc.version||'-', uptime:rsc.uptime||'-', datetime:((clk.date||'')+' '+(clk.time||'')) },
       cpu_raw:parseInt(rsc['cpu-load']||0,10), cpu:(rsc['cpu-load']||'0')+'%',

@@ -57,13 +57,27 @@ function printOverlay(inner){
     <span class="sub">Bisa juga di-screenshot</span></div><div class="printpage">${inner}</div>`;
   document.body.appendChild(o);
 }
+function logoSrc(){ return Store.logo || 'img/logo.png'; }
+function humanDur(v){ v=String(v||'').trim(); if(!v) return '-';
+  let d=0,h=0,m=0; const dm=v.match(/(\d+)\s*d/i); if(dm)d=+dm[1]; const hm=v.match(/(\d+)\s*h/i); if(hm)h=+hm[1]; const mm=v.match(/(\d+)\s*m(?!s)/i); if(mm&&!/:/.test(v))m=+mm[1];
+  const t=v.match(/(\d{1,3}):(\d{2}):(\d{2})/); if(t){ d+=Math.floor(+t[1]/24); h+=(+t[1])%24; m+=+t[2]; }
+  const p=[]; if(d)p.push(d+' Hari'); if(h)p.push(h+'Jam'); if(m)p.push(m+' Menit'); return p.join(' ')||v;
+}
+function masaAktif(profileName){ const p=(profileCache||[]).find(x=>x.name===profileName); return p&&p.validity?humanDur(p.validity):'-'; }
 function voucherCardHTML(v){
-  return `<div class="vc"><h4>Layanan Wifi ${esc(Store.appName)}</h4>
-    <div class="vbig">${esc(v.user)}</div>
-    <div class="vr"><span>Profil</span><b>${esc(v.profile)}</b></div>
-    <div class="vr"><span>Komentar</span><b>${esc(v.comment||'-')}</b></div>
-    <div class="vr"><span>Harga</span><b>${esc(v.price)}</b></div>
-    <div class="vfoot">${esc(Store.footer)}</div></div>`;
+  const masa=v.masa||masaAktif(v.profile);
+  const note=esc(Store.vnote);
+  const qr='https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data='+encodeURIComponent(v.user);
+  return `<div class="tkt">
+    <div class="tkt-price"><span>${esc(v.price||'')}</span></div>
+    <div class="tkt-main">
+      <img class="tkt-logo" src="${esc(logoSrc())}" alt="logo">
+      <div class="tkt-code">${esc(v.user)}</div>
+      <div class="tkt-masa">Masa aktif: ${esc(masa)}</div>
+      <div class="tkt-note">${note}</div>
+    </div>
+    <div class="tkt-qr"><img src="${qr}" alt="QR" onerror="this.style.display='none'"></div>
+  </div>`;
 }
 function waSingle(v){ return `Layanan Wifi ${Store.appName}\n___________________________\nUser     : ${v.user}\nProfil   : ${v.profile}\nKomentar : ${v.comment||'-'}\nHarga    : ${v.price}\n___________________________\n${Store.footer}`; }
 function waMulti(list){ let s=`Layanan Wifi ${Store.appName}\n___________________________\n`; list.forEach((v,i)=>{ s+=`Voucer ${i+1}\nUser     : ${v.user}\nProfil   : ${v.profile}\nKomentar : ${v.comment||'-'}\nHarga    : ${v.price}\n\n`; }); s+=`___________________________\n${Store.footer}`; return s; }
@@ -161,8 +175,9 @@ function renderServers(list,cur){
 }
 function meterBar(value,max,opt){ opt=opt||{}; const pct=Math.max(0,Math.min(100,max>0?value/max*100:0)); let color='var(--accent)'; if(opt.red!=null&&value>=opt.red)color='var(--danger)'; else if(opt.yellow!=null&&value>=opt.yellow)color='var(--warn)'; return `<div class="meter"><span style="width:${pct}%;background:${color}"></span></div>`; }
 function renderIfaces(list){ const h=$('#ifList'); if(!h)return; if(!list||!list.length){h.innerHTML='<div class="sub">—</div>';return;}
-  h.innerHTML=list.map(i=>{ const dM=mbps(i.rx_bps),uM=mbps(i.tx_bps),tot=dM+uM;
-    return `<div class="mb"><div class="kv"><span class="k">${esc(i.name)}</span><span class="v">↓${dM.toFixed(1)} ↑${uM.toFixed(1)} Mbps</span></div>${meterBar(tot,50,{yellow:30,red:40})}</div>`;
+  h.innerHTML=list.map(i=>{ const dM=mbps(i.rx_bps),uM=mbps(i.tx_bps),tot=dM+uM; const live=(i.rx_bps||i.tx_bps);
+    const val= live?`↓${dM.toFixed(1)} ↑${uM.toFixed(1)} Mbps`:(i.bytes!=null?fmtBytes(i.bytes)+' total':'0');
+    return `<div class="mb"><div class="kv"><span class="k">${esc(i.name)}</span><span class="v">${val}</span></div>${meterBar(tot,50,{yellow:30,red:40})}</div>`;
   }).join(''); }
 function renderTopUsers(list){ const h=$('#topUsers'); if(!h)return; if(!list||!list.length){h.innerHTML='<div class="sub">—</div>';return;}
   h.innerHTML=list.map((u,i)=>{ const gb=(u.total||0)/1073741824;
@@ -502,9 +517,10 @@ function subHead(title){ return `<div class="page-title"><span onclick="perBack(
 
 function subApp(){ view().innerHTML=subHead('Pengaturan Aplikasi')+`<div class="card">
   <label class="fld"><span class="cap">Nama Aplikasi</span><input class="input" id="sAppName" value="${esc(Store.appName)}"></label>
-  <label class="fld"><span class="cap">Footer Voucher</span><input class="input" id="sFooter" value="${esc(Store.footer)}"></label>
+  <label class="fld"><span class="cap">Footer Voucher (teks WA)</span><input class="input" id="sFooter" value="${esc(Store.footer)}"></label>
+  <label class="fld"><span class="cap">Catatan Voucher (template cetak)</span><input class="input" id="sVnote" value="${esc(Store.vnote)}"></label>
   <button class="btn pri block" onclick="saveApp()">Simpan</button></div>`; }
-window.saveApp=()=>{ Store.appName=$('#sAppName').value.trim()||'ALHUDA_D.NET'; Store.footer=$('#sFooter').value.trim(); applyBranding(); toast('Disimpan','ok'); };
+window.saveApp=()=>{ Store.appName=$('#sAppName').value.trim()||'ALHUDA_D.NET'; Store.footer=$('#sFooter').value.trim(); Store.vnote=$('#sVnote').value.trim(); applyBranding(); toast('Disimpan','ok'); };
 
 function subLogo(){ view().innerHTML=subHead('Logo')+`<div class="card">
   <input type="file" id="logoFile" accept="image/*" class="input">
@@ -520,10 +536,10 @@ function subTema(){ view().innerHTML=subHead('Tema Aplikasi')+`<div class="card"
 window.setTheme=(t)=>{ Store.theme=t; document.documentElement.setAttribute('data-theme',t); subTema(); };
 
 function subPdf(){ view().innerHTML=subHead('Template Cetak PDF')+`<div class="card">
-  <div class="note">Template voucher memakai Nama Aplikasi + Logo + Footer di atas. Pratinjau:</div>
-  <div class="vgrid" style="background:#fff;border-radius:12px;padding:10px">${voucherCardHTML({user:'ABCD12',profile:'1hari',comment:'contoh',price:'Rp 3.000'})}</div>
+  <div class="note">Template tiket memakai Logo + harga + masa aktif + QR + Catatan Voucher. Pratinjau:</div>
+  <div class="vgrid" style="background:#fff;border-radius:12px;padding:10px">${voucherCardHTML({user:'673',profile:'1hari',price:'Rp 1.000',masa:'3Jam'})}</div>
   <button class="btn pri block mt" onclick="pdfPreview()">🖨 Coba Cetak</button></div>`; }
-window.pdfPreview=()=>{ printOverlay(`<div class="vgrid">${voucherCardHTML({user:'ABCD12',profile:'1hari',comment:'contoh',price:'Rp 3.000'})}</div>`); };
+window.pdfPreview=()=>{ printOverlay(`<div class="vgrid">${voucherCardHTML({user:'673',profile:'1hari',price:'Rp 1.000',masa:'3Jam'})}</div>`); };
 
 /* ---- Router submenu (local router CRUD) ---- */
 function subRouter(){
