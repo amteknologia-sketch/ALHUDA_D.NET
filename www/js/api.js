@@ -154,6 +154,12 @@ async function api(action, params={}){
         uptime:a.uptime||'', login_by:a['login-by']||'', comment:a.comment||'' }; });
   }
 
+  case 'activeusage': {
+    const rt=requireRouter();
+    const rows=await ros(rt,'/ip/hotspot/active/print',{'.proplist':'user,bytes-in,bytes-out'});
+    return rows.map(a=>({ user:a.user||'?', bin:+(a['bytes-in']||0), bout:+(a['bytes-out']||0) }));
+  }
+
   case 'home': {
     const rt=requireRouter(); const now=new Date(); const cur=rt.currency||'Rp';
     const b1=await rosExec(rt,[
@@ -176,6 +182,7 @@ async function api(action, params={}){
     const tu=users.map(u=>({name:u.name||'?', total:(+(u['bytes-in']||0))+(+(u['bytes-out']||0))})).sort((a,b)=>b.total-a.total).slice(0,20);
     const tif=rt.iface; const tifo=ifaces.find(i=>i.name===tif)||{};
     const dataBytes=(+(tifo['rx-byte']||0))+(+(tifo['tx-byte']||0));
+    const userDataBytes=users.reduce((a,u)=>a+(+(u['bytes-in']||0))+(+(u['bytes-out']||0)),0);
     // monitor traffic (tahan-error: interface tak valid dilewati, tidak menggagalkan semua)
     const validSet=new Set(ifaces.map(i=>i.name));
     const srvList=servers.filter(s=>s.interface && validSet.has(s.interface));
@@ -190,7 +197,7 @@ async function api(action, params={}){
       device:{ boardname:rsc['board-name']||'-', model:rb.model||rsc['board-name']||'-', version:rsc.version||'-', uptime:rsc.uptime||'-', datetime:((clk.date||'')+' '+(clk.time||'')) },
       cpu_raw:parseInt(rsc['cpu-load']||0,10), cpu:(rsc['cpu-load']||'0')+'%',
       freemem:+(rsc['free-memory']||0), totalmem:+(rsc['total-memory']||0),
-      temp, dataBytes, active:actives.length, users:users.length, currency:cur,
+      temp, dataBytes, userDataBytes, active:actives.length, users:users.length, currency:cur,
       income_today:sum(today), income_month:sum(month),
       servers:srvStats, interfaces:ifStats, topusers:tu, trafficIface:tif,
     };

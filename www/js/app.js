@@ -35,8 +35,8 @@ function meterHTML(id,label,value,max,opt){
   if(opt.red!=null && value>=opt.red) color='var(--danger)';
   else if(opt.yellow!=null && value>=opt.yellow) color='var(--warn)';
   const disp=opt.display!=null?opt.display:value;
-  return `<div class="kv"><span class="k">${esc(label)}</span><span class="v" id="${id}_t">${esc(disp)}</span></div>
-    <div class="meter"><span id="${id}_b" style="width:${pct}%;background:${color}"></span></div>`;
+  return `<div class="mind"><div class="kv"><span class="k">${esc(label)}</span><span class="v" id="${id}_t">${esc(disp)}</span></div>
+    <div class="meter"><span id="${id}_b" style="width:${pct}%;background:${color}"></span></div></div>`;
 }
 function updateMeter(id,value,max,opt){
   opt=opt||{}; const b=$('#'+id+'_b'), t=$('#'+id+'_t'); if(!b) return;
@@ -130,11 +130,13 @@ const PAGES={};
    BERANDA
 ====================================================================== */
 PAGES.beranda=async function(){
+  _liveSnap=null;
   const sel=$('#sessionSel').selectedOptions[0]?.textContent||'';
   view().innerHTML=`
     <div class="page-title">Beranda · ${esc(sel)}</div>
     <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"></span></h3><div id="indic"><div class="sub">memuat…</div></div></div>
     <div class="card"><h3><span class="dot"></span> Interface Padat</h3><div id="ifList"><div class="sub">—</div></div></div>
+    <div class="card"><h3><span class="dot"></span> 5 User Lalu Lintas Terbesar <span id="liveSpin" style="margin-left:auto"></span></h3><div id="topLive"><div class="sub">menunggu lalu lintas…</div></div></div>
     <div class="card"><h3><span class="dot"></span> 20 User Pemakaian Terbesar</h3><div id="topUsers"><div class="sub">—</div></div></div>
     <div class="grid c2 mt">
       <button class="btn pri" onclick="go('log')">📜 Log Hotspot</button>
@@ -149,12 +151,12 @@ PAGES.beranda=async function(){
 };
 function renderHome(d){
   const cur=d.currency||'Rp'; const memPct=d.totalmem?Math.round((1-d.freemem/d.totalmem)*100):0;
-  const dataGB=(d.dataBytes||0)/1073741824;
+  const dataGB=(d.userDataBytes||0)/1073741824;
   const indic=$('#indic'); if(indic){ indic.innerHTML=
     meterHTML('mCpu','Beban CPU',d.cpu_raw,100,{display:d.cpu})+
     meterHTML('mMem','Memori Tersedia',memPct,100,{display:fmtBytes(d.freemem)+(d.totalmem?' / '+fmtBytes(d.totalmem):'')})+
     meterHTML('mTemp','Temperature (Health)',(d.temp||0),50,{yellow:35,red:40,display:(d.temp!=null?d.temp+'°C':'N/A')})+
-    meterHTML('mData','Pemakaian Data Bulan Ini',dataGB,10000,{yellow:8000,red:9000,display:dataGB.toFixed(2)+' GB'})+
+    meterHTML('mData','Total Data',dataGB,10000,{yellow:8000,red:9000,display:fmtBytes(d.userDataBytes||0)+' ('+dataGB.toFixed(2)+' GB)'})+
     meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
     meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'})+
     meterHTML('mIncM','Pendapatan Bulan ini',d.income_month,6000000,{display:money(cur,d.income_month)})+
@@ -183,7 +185,32 @@ function renderTopUsers(list){ const h=$('#topUsers'); if(!h)return; if(!list||!
   }).join(''); }
 function startTrafficPoll(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps); const tot=dM+uM;
   updateMeter('mTraf',tot,200,{yellow:150,red:180,display:tot.toFixed(2)+' Mbps  (↓'+dM.toFixed(1)+' ↑'+uM.toFixed(1)+')'}); }catch(e){} };
+  tick(); timers.push(setInterval(tick,4000)); startLivePoll(); }
+
+/* 5 user lalu lintas terbesar — rate dihitung dari selisih byte antar polling */
+let _liveSnap=null;
+function startLivePoll(){ const tick=async()=>{ try{
+    const rows=await api('activeusage'); const now=Date.now();
+    const cur={}; rows.forEach(r=>{ cur[r.user]=r; });
+    const list=[];
+    if(_liveSnap){ const dt=(now-_liveSnap.t)/1000;
+      if(dt>0.5){ for(const u in cur){ const p=_liveSnap.d[u]; if(!p) continue;
+        const dRx=Math.max(0,(cur[u].bout-p.bout)), dTx=Math.max(0,(cur[u].bin-p.bin));
+        const dMbps=dRx*8/dt/1e6, uMbps=dTx*8/dt/1e6;
+        list.push({name:u, down:dMbps, up:uMbps, tot:dMbps+uMbps}); } }
+    }
+    _liveSnap={t:now, d:cur};
+    list.sort((a,b)=>b.tot-a.tot);
+    renderTopLive(list.slice(0,5));
+    const sp=$('#liveSpin'); if(sp) sp.innerHTML='';
+  }catch(e){} };
+  const sp=$('#liveSpin'); if(sp) sp.innerHTML='<span class="spin"></span>';
   tick(); timers.push(setInterval(tick,4000)); }
+function renderTopLive(list){ const h=$('#topLive'); if(!h)return;
+  if(!list||!list.length){ h.innerHTML='<div class="sub">Tidak ada lalu lintas aktif.</div>'; return; }
+  h.innerHTML=list.map((u,i)=>{ const v='↓'+u.down.toFixed(2)+' ↑'+u.up.toFixed(2)+' = '+u.tot.toFixed(2)+' Mbps';
+    return `<div class="mb"><div class="kv"><span class="k">${i+1}. ${esc(u.name)}</span><span class="v">${v}</span></div>${meterBar(u.tot,30,{yellow:20,red:25})}</div>`;
+  }).join(''); }
 
 /* shared active-detail list (User, Server, Mac, IP, Download, Upload, Total) + search + sort */
 let _activeCache=[], _activeSort='total', _activeFilterServer='';

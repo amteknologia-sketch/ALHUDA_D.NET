@@ -70,6 +70,9 @@ h1,h2,h3{margin:0}
 
 .meter{height:8px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:8px}
 .meter>span{display:block;height:100%;background:var(--accent)}
+.mind{padding:12px 0;border-top:1px solid var(--line)}
+.mind:first-child{border-top:0;padding-top:2px}
+.mind .kv{border-bottom:0;padding:0 0 2px}
 
 /* Buttons */
 .btn{appearance:none;border:0;border-radius:12px;padding:11px 14px;font-weight:700;font-size:14px;background:var(--chip);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}
