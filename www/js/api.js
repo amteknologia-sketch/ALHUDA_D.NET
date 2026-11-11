@@ -14,16 +14,27 @@ const Store = {
   set routers(v){ localStorage.setItem('ad_routers', JSON.stringify(v)); },
 };
 
-/* ---------- plugin native ---------- */
-const RouterosPlugin = (window.Capacitor && window.Capacitor.registerPlugin)
-  ? window.Capacitor.registerPlugin('Routeros') : null;
+/* ---------- plugin native (diselesaikan saat dipakai, bukan saat awal) ---------- */
+let _ros = null;
+function getRouteros(){
+  if(_ros) return _ros;
+  const C = window.Capacitor;
+  if(C && typeof C.registerPlugin === 'function'){ _ros = C.registerPlugin('Routeros'); return _ros; }
+  if(C && C.Plugins && C.Plugins.Routeros){ _ros = C.Plugins.Routeros; return _ros; }
+  return null;
+}
 
 function currentRouter(){ const rs=Store.routers; return rs.find(r=>r.name===Store.session) || rs[0] || null; }
 function requireRouter(){ const r=currentRouter(); if(!r) throw new Error('Belum ada router. Tambahkan di menu Peraturan.'); return r; }
 
 async function rosExec(router, commands){
-  if(!RouterosPlugin) throw new Error('Koneksi langsung hanya tersedia di aplikasi (APK), tidak di browser biasa.');
-  const r = await RouterosPlugin.exec({
+  const RP = getRouteros();
+  if(!RP){
+    const C = window.Capacitor;
+    const info = C ? ('Capacitor ada (platform='+(C.getPlatform?C.getPlatform():'?')+', keys: '+Object.keys(C).slice(0,10).join(',')+')') : 'window.Capacitor TIDAK ADA';
+    throw new Error('Plugin native tak terdeteksi → '+info);
+  }
+  const r = await RP.exec({
     host: router.host, port: parseInt(router.port,10)||8728,
     user: router.user||'', pass: router.pass||'', timeout: 7000, commands
   });
@@ -55,7 +66,6 @@ function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
    api(action, params) — antarmuka yang dipakai seluruh halaman UI
 =================================================================== */
 async function api(action, params={}){
-  const r = (['sessions'].includes(action)) ? null : null; // router diambil per-aksi
   switch(action){
 
   case 'sessions':
