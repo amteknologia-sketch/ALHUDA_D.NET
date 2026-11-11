@@ -14,6 +14,11 @@ const Store = {
   set routers(v){ localStorage.setItem('ad_routers', JSON.stringify(v)); },
 };
 
+/* ---------- cache (untuk mode offline / tanpa loading) ---------- */
+function cacheKey(action,params){ return 'c_'+Store.session+'_'+action+'_'+JSON.stringify(params||{}); }
+function cachePeek(action,params){ try{ const v=localStorage.getItem(cacheKey(action,params)); return v?JSON.parse(v):null; }catch(e){ return null; } }
+async function apiCached(action,params){ const d=await api(action,params); try{ localStorage.setItem(cacheKey(action,params),JSON.stringify(d)); }catch(e){} return d; }
+
 /* ---------- plugin native (diselesaikan saat dipakai, bukan saat awal) ---------- */
 let _ros = null;
 function getRouteros(){
@@ -130,6 +135,56 @@ async function api(action, params={}){
       return { id:a['.id']||'', user:a.user||'', server:a.server||'', address:a.address||'', mac:a['mac-address']||'',
         bytes_in:bin, bytes_out:bout, download:bout, upload:bin, total:bin+bout,
         uptime:a.uptime||'', login_by:a['login-by']||'', comment:a.comment||'' }; });
+  }
+
+  case 'home': {
+    const rt=requireRouter(); const now=new Date(); const cur=rt.currency||'Rp';
+    const b1=await rosExec(rt,[
+      {command:'/system/resource/print'},
+      {command:'/system/routerboard/print'},
+      {command:'/system/clock/print'},
+      {command:'/system/health/print'},
+      {command:'/ip/hotspot/active/print', attrs:{'.proplist':'.id,server'}},
+      {command:'/ip/hotspot/user/print', attrs:{'.proplist':'name,bytes-in,bytes-out'}},
+      {command:'/system/script/print', queries:{source:dayLabel(now)}},
+      {command:'/system/script/print', queries:{owner:monLabel(now)}},
+      {command:'/ip/hotspot/print'},
+      {command:'/interface/print'},
+    ]);
+    const rsc=b1[0][0]||{}, rb=b1[1][0]||{}, clk=b1[2][0]||{}, health=b1[3]||[], actives=b1[4]||[], users=b1[5]||[], today=b1[6]||[], month=b1[7]||[], servers=b1[8]||[], ifaces=b1[9]||[];
+    let temp=null;
+    health.forEach(h=>{ if((h.name==='temperature'||h.name==='cpu-temperature'||h.name==='board-temperature')&&h.value!=null) temp=parseFloat(h.value); if(h.temperature!=null) temp=parseFloat(h.temperature); if(h['cpu-temperature']!=null) temp=parseFloat(h['cpu-temperature']); });
+    const sum=arr=>arr.reduce((a,s)=>a+(parseFloat((s.name||'').split('-|-')[3])||0),0);
+    const countBy={}; actives.forEach(x=>{const s=x.server||'?';countBy[s]=(countBy[s]||0)+1;});
+    const tu=users.map(u=>({name:u.name||'?', total:(+(u['bytes-in']||0))+(+(u['bytes-out']||0))})).sort((a,b)=>b.total-a.total).slice(0,10);
+    const tif=rt.iface; const tifo=ifaces.find(i=>i.name===tif)||{};
+    const dataBytes=(+(tifo['rx-byte']||0))+(+(tifo['tx-byte']||0));
+    // monitor traffic: per server + per interface
+    const srvList=servers.filter(s=>s.interface);
+    const ifList=ifaces.filter(i=>i.name && i.name!==tif);
+    const monCmds=[];
+    srvList.forEach(s=>monCmds.push({command:'/interface/monitor-traffic',attrs:{interface:s.interface,once:''}}));
+    ifList.forEach(i=>monCmds.push({command:'/interface/monitor-traffic',attrs:{interface:i.name,once:''}}));
+    const mon=monCmds.length?await rosExec(rt,monCmds):[];
+    const srvStats=srvList.map((s,idx)=>({name:s.name, active:countBy[s.name]||0,
+      rx_bps:+(((mon[idx]||[])[0]||{})['rx-bits-per-second']||0), tx_bps:+(((mon[idx]||[])[0]||{})['tx-bits-per-second']||0)})).sort((a,b)=>b.active-a.active);
+    const base=srvList.length;
+    const ifStats=ifList.map((i,idx)=>{ const rx=+(((mon[base+idx]||[])[0]||{})['rx-bits-per-second']||0), tx=+(((mon[base+idx]||[])[0]||{})['tx-bits-per-second']||0);
+      return {name:i.name, rx_bps:rx, tx_bps:tx, total:rx+tx}; }).sort((a,b)=>b.total-a.total).slice(0,5);
+    return {
+      device:{ boardname:rsc['board-name']||'-', model:rb.model||rsc['board-name']||'-', version:rsc.version||'-', uptime:rsc.uptime||'-', datetime:((clk.date||'')+' '+(clk.time||'')) },
+      cpu_raw:parseInt(rsc['cpu-load']||0,10), cpu:(rsc['cpu-load']||'0')+'%',
+      freemem:+(rsc['free-memory']||0), totalmem:+(rsc['total-memory']||0),
+      temp, dataBytes, active:actives.length, users:users.length, currency:cur,
+      income_today:sum(today), income_month:sum(month),
+      servers:srvStats, interfaces:ifStats, topusers:tu, trafficIface:tif,
+    };
+  }
+
+  case 'dirs': {
+    const rt=requireRouter(); const rows=await ros(rt,'/file/print',{'.proplist':'name,type'});
+    const dirs=rows.filter(f=>/directory/i.test(f.type||'')).map(f=>f.name).filter(Boolean);
+    return dirs;
   }
 
   case 'serverstats': {

@@ -70,7 +70,7 @@ function waMulti(list){ let s=`Layanan Wifi ${Store.appName}\n__________________
 
 /* ---------- profiles cache ---------- */
 let profileCache=null;
-async function getProfiles(force){ if(profileCache&&!force) return profileCache; profileCache=await api('profiles'); return profileCache; }
+async function getProfiles(force){ if(profileCache&&!force) return profileCache; try{ profileCache=await apiCached('profiles'); }catch(e){ const c=cachePeek('profiles'); if(c){profileCache=c;}else throw e; } return profileCache; }
 function priceOf(profiles,name){ const p=(profiles||[]).find(x=>x.name===name); return p?p.price_text:' '; }
 
 /* ======================================================================
@@ -119,55 +119,58 @@ PAGES.beranda=async function(){
   const sel=$('#sessionSel').selectedOptions[0]?.textContent||'';
   view().innerHTML=`
     <div class="page-title">Beranda · ${esc(sel)}</div>
-    <div class="card"><h3><span class="dot"></span> Informasi Perangkat</h3>
-      <div id="devInfo"><div class="loading"><span class="spin"></span></div></div></div>
-    <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"><span class="spin"></span></span></h3>
-      <div id="indic"><div class="sub">memuat…</div></div></div>
-    <div class="card"><h3><span class="dot"></span> Server Hotspot <span id="srvSpin" style="margin-left:auto"><span class="spin"></span></span></h3>
-      <div id="srvList"><div class="sub">memuat…</div></div></div>
+    <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"></span></h3><div id="indic"><div class="sub">memuat…</div></div></div>
+    <div class="card"><h3><span class="dot"></span> Server Hotspot</h3><div id="srvList"><div class="sub">—</div></div></div>
+    <div class="card"><h3><span class="dot"></span> Interface Padat</h3><div id="ifList"><div class="sub">—</div></div></div>
+    <div class="card"><h3><span class="dot"></span> 10 User Pemakaian Terbesar</h3><div id="topUsers"><div class="sub">—</div></div></div>
     <div class="grid c2 mt">
       <button class="btn pri" onclick="go('log')">📜 Log Hotspot</button>
       <button class="btn ok" onclick="pgTambah()">➕ Tambah Pengguna</button>
       <button class="btn warn" onclick="pgHasilkan()">🎫 Hasilkan Pengguna</button>
       <button class="btn ghost" onclick="showCookies()">🍪 Cookies</button>
     </div>`;
-  let cur='Rp';
-  try{
-    const d=await api('dashboard'); cur=d.currency||'Rp';
-    const memPct=d.totalmem?Math.round((1-d.freemem/d.totalmem)*100):0;
-    $('#devInfo').innerHTML=`
-      <div class="kv"><span class="k">Nama Papan</span><span class="v">${esc(d.boardname)}</span></div>
-      <div class="kv"><span class="k">Model</span><span class="v">${esc(d.model)}</span></div>
-      <div class="kv"><span class="k">RouterOS</span><span class="v">${esc(d.version)}</span></div>
-      <div class="kv"><span class="k">Waktu</span><span class="v">${esc(d.datetime)} · up ${esc(d.uptime)}</span></div>`;
-    $('#indic').innerHTML=
-      meterHTML('mCpu','Beban CPU',d.cpu_raw,100,{display:d.cpu})+
-      meterHTML('mMem','Memori Tersedia',memPct,100,{display:fmtBytes(d.freemem)+(d.totalmem?' / '+fmtBytes(d.totalmem):'')})+
-      meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
-      meterHTML('mDown','Lalu Lintas Download',0,200,{yellow:150,red:180,display:'…'})+
-      meterHTML('mUp','Lalu Lintas Upload',0,200,{yellow:150,red:180,display:'…'})+
-      meterHTML('mInc','Pendapatan Hari ini',d.income_today.sum,6000000,{display:money(cur,d.income_today.sum)});
-    const indSpin=$('#indSpin'); if(indSpin) indSpin.remove();
-    const tick=async()=>{ try{ const t=await api('traffic');
-      const dM=mbps(t.rx_bps), uM=mbps(t.tx_bps);
-      updateMeter('mDown',dM,200,{yellow:150,red:180,display:dM.toFixed(2)+' Mbps'});
-      updateMeter('mUp',uM,200,{yellow:150,red:180,display:uM.toFixed(2)+' Mbps'});
-    }catch(e){} };
-    tick(); timers.push(setInterval(tick,4000));
-  }catch(e){ $('#devInfo').innerHTML=`<div class="empty">${esc(e.message)}</div>`; const s=$('#indSpin'); if(s)s.remove(); $('#indic').innerHTML=''; }
-  try{ const srv=await api('serverstats'); renderServers(srv,cur); }
-  catch(e){ $('#srvList').innerHTML=`<div class="sub">${esc(e.message)}</div>`; }
-  const ss=$('#srvSpin'); if(ss) ss.remove();
+  const cached=cachePeek('home');
+  if(cached){ renderHome(cached); } else { $('#indSpin').innerHTML='<span class="spin"></span>'; }
+  try{ const d=await apiCached('home'); renderHome(d); $('#indSpin').innerHTML=''; startTrafficPoll(); }
+  catch(e){ $('#indSpin').innerHTML=''; if(cached){ startTrafficPoll(); toast('Mode offline — data tersimpan','') ; } else { $('#indic').innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
 };
+function renderHome(d){
+  const cur=d.currency||'Rp'; const memPct=d.totalmem?Math.round((1-d.freemem/d.totalmem)*100):0;
+  const dataGB=(d.dataBytes||0)/1073741824;
+  const indic=$('#indic'); if(indic){ indic.innerHTML=
+    meterHTML('mCpu','Beban CPU',d.cpu_raw,100,{display:d.cpu})+
+    meterHTML('mMem','Memori Tersedia',memPct,100,{display:fmtBytes(d.freemem)+(d.totalmem?' / '+fmtBytes(d.totalmem):'')})+
+    meterHTML('mTemp','Temperature (Health)',(d.temp||0),50,{yellow:35,red:40,display:(d.temp!=null?d.temp+'°C':'N/A')})+
+    meterHTML('mData','Pemakaian Data Bulan Ini',dataGB,10000,{yellow:8000,red:9000,display:dataGB.toFixed(2)+' GB'})+
+    meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
+    meterHTML('mDown','Lalu Lintas Download',0,200,{yellow:150,red:180,display:'…'})+
+    meterHTML('mUp','Lalu Lintas Upload',0,200,{yellow:150,red:180,display:'…'})+
+    meterHTML('mIncM','Pendapatan Bulan ini',d.income_month,6000000,{display:money(cur,d.income_month)})+
+    meterHTML('mIncD','Pendapatan Hari ini',d.income_today,300000,{yellow:200000,red:250000,display:money(cur,d.income_today)});
+  }
+  renderServers(d.servers,cur); renderIfaces(d.interfaces); renderTopUsers(d.topusers);
+}
 function renderServers(list,cur){
   const h=$('#srvList'); if(!h) return;
-  if(!list.length){ h.innerHTML='<div class="sub">Tidak ada server hotspot.</div>'; return; }
+  if(!list||!list.length){ h.innerHTML='<div class="sub">Tidak ada server hotspot.</div>'; return; }
   h.innerHTML=list.map((s,i)=>`<div class="item">
     <div class="top"><div class="nm">${i+1}. ${esc(s.name)}</div><span class="pill">${s.active} online</span></div>
     <div class="meta"><span>Download: <b>${fmtMbps(s.rx_bps)}</b></span><span>Upload: <b>${fmtMbps(s.tx_bps)}</b></span></div>
     <div class="btnrow mt"><button class="btn sm pri" onclick="showActiveDetail('${esc(s.name)}')">👥 Lihat User online</button></div>
   </div>`).join('');
 }
+function meterBar(value,max,opt){ opt=opt||{}; const pct=Math.max(0,Math.min(100,max>0?value/max*100:0)); let color='var(--accent)'; if(opt.red!=null&&value>=opt.red)color='var(--danger)'; else if(opt.yellow!=null&&value>=opt.yellow)color='var(--warn)'; return `<div class="meter"><span style="width:${pct}%;background:${color}"></span></div>`; }
+function renderIfaces(list){ const h=$('#ifList'); if(!h)return; if(!list||!list.length){h.innerHTML='<div class="sub">—</div>';return;}
+  h.innerHTML=list.map(i=>{ const dM=mbps(i.rx_bps),uM=mbps(i.tx_bps),tot=dM+uM;
+    return `<div class="mb"><div class="kv"><span class="k">${esc(i.name)}</span><span class="v">↓${dM.toFixed(1)} ↑${uM.toFixed(1)} Mbps</span></div>${meterBar(tot,50,{yellow:30,red:40})}</div>`;
+  }).join(''); }
+function renderTopUsers(list){ const h=$('#topUsers'); if(!h)return; if(!list||!list.length){h.innerHTML='<div class="sub">—</div>';return;}
+  h.innerHTML=list.map((u,i)=>{ const gb=(u.total||0)/1073741824;
+    return `<div class="mb"><div class="kv"><span class="k">${i+1}. ${esc(u.name)}</span><span class="v">${gb.toFixed(2)} GB</span></div>${meterBar(gb,500,{yellow:400,red:450})}</div>`;
+  }).join(''); }
+function startTrafficPoll(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps);
+  updateMeter('mDown',dM,200,{yellow:150,red:180,display:dM.toFixed(2)+' Mbps'}); updateMeter('mUp',uM,200,{yellow:150,red:180,display:uM.toFixed(2)+' Mbps'}); }catch(e){} };
+  tick(); timers.push(setInterval(tick,4000)); }
 
 /* shared active-detail list (User, Server, Mac, IP, Download, Upload, Total) + search + sort */
 let _activeCache=[], _activeSort='total', _activeFilterServer='';
@@ -224,7 +227,8 @@ PAGES.pengguna=async function(){
     </div><div id="pgBody"></div>`;
   $('#pgTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{pgTab=b.dataset.t;renderPgTab();});
   renderPgTab();
-  try{ const d=await api('dashboard'); $('#totUsers').textContent=d.users; $('#totActive').textContent=d.active+' Online'; }catch(e){}
+  const hc=cachePeek('home'); if(hc){ $('#totUsers').textContent=hc.users; $('#totActive').textContent=hc.active+' Online'; }
+  try{ const d=await apiCached('home'); $('#totUsers').textContent=d.users; $('#totActive').textContent=d.active+' Online'; }catch(e){}
 };
 function renderPgTab(){ document.querySelectorAll('#pgTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===pgTab));
   ({lihat:tabLihat,tambah:tabTambah,hasilkan:tabHasilkan,cepat:tabCepat,profil:tabProfil}[pgTab])(); }
@@ -232,15 +236,18 @@ window.pgTambah=()=>{ go('pengguna').then(()=>{pgTab='tambah';renderPgTab();}); 
 window.pgHasilkan=()=>{ go('pengguna').then(()=>{pgTab='hasilkan';renderPgTab();}); };
 
 async function tabLihat(){
-  const body=$('#pgBody'); body.innerHTML=`<div class="loading"><span class="spin"></span></div>`;
-  try{
-    const [profiles,users]=await Promise.all([getProfiles(),api('users')]);
+  const body=$('#pgBody');
+  const build=(profiles,users)=>{
     const opts=`<option value="all">Semua Profil</option>`+profiles.map(p=>`<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
     body.innerHTML=`<div class="searchbar"><input class="input" id="uSearch" placeholder="Cari user / komentar…" oninput="filterUsers()">
       <select class="input" style="max-width:40%" id="uProf" onchange="reloadUsers()">${opts}</select></div>
       <div class="sub mb" id="uCount"></div><div class="list" id="uList"></div>`;
     window.__users=users; window.__profiles=profiles; paintUsers(users);
-  }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+  };
+  const cu=cachePeek('users',{}), cp=cachePeek('profiles');
+  if(cu&&cp){ build(cp,cu); } else { body.innerHTML=`<div class="loading"><span class="spin"></span></div>`; }
+  try{ const [profiles,users]=await Promise.all([getProfiles(true),apiCached('users',{})]); build(profiles,users); }
+  catch(e){ if(!(cu&&cp)) body.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 }
 function paintUsers(users){
   $('#uCount').textContent=users.length+' pengguna';
@@ -376,15 +383,12 @@ PAGES.log=async function(){
   renderLog();
 };
 function renderLog(){ document.querySelectorAll('#lgTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===logTab)); ({pengguna:logUser,hotspot:logHotspot,cookies:logCookies}[logTab])(); }
-async function logUser(){ const b=$('#lgBody'); b.innerHTML=`<div class="loading"><span class="spin"></span></div>`;
-  try{ const l=await api('logpengguna'); b.innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.time)}</div></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log pengguna.</div>'}</div>`;
-  }catch(e){ b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
-async function logHotspot(){ const b=$('#lgBody'); b.innerHTML=`<div class="loading"><span class="spin"></span></div>`;
-  try{ const l=await api('log'); b.innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.user)}</div><span class="sub">${esc(x.time)}</span></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log.</div>'}</div>`;
-  }catch(e){ b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
-async function logCookies(){ const b=$('#lgBody'); b.innerHTML=`<div class="loading"><span class="spin"></span></div>`;
-  try{ const c=await api('cookies'); b.innerHTML=`<div class="list">${c.length?c.map(x=>`<div class="item"><div class="top"><div class="nm">${esc(x.user)}</div><button class="btn sm dang" onclick="delCookie('${esc(x.id)}')">🗑</button></div><div class="meta"><span>MAC: <b>${esc(x.mac)}</b></span><span>Exp: <b>${esc(x.expires)}</b></span></div></div>`).join(''):'<div class="empty">Tidak ada cookie.</div>'}</div>`;
-  }catch(e){ b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
+async function logLoad(action,render){ const b=$('#lgBody'); const c=cachePeek(action,{});
+  if(c){ render(c); } else { b.innerHTML=`<div class="loading"><span class="spin"></span></div>`; }
+  try{ render(await apiCached(action,{})); }catch(e){ if(!c) b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } }
+function logUser(){ logLoad('logpengguna',l=>{ $('#lgBody').innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.time)}</div></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log pengguna.</div>'}</div>`; }); }
+function logHotspot(){ logLoad('log',l=>{ $('#lgBody').innerHTML=`<div class="list">${l.length?l.map(x=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px">${esc(x.user)}</div><span class="sub">${esc(x.time)}</span></div><div class="meta"><span>${esc(x.message)}</span></div></div>`).join(''):'<div class="empty">Tidak ada log.</div>'}</div>`; }); }
+function logCookies(){ logLoad('cookies',c=>{ $('#lgBody').innerHTML=`<div class="list">${c.length?c.map(x=>`<div class="item"><div class="top"><div class="nm">${esc(x.user)}</div><button class="btn sm dang" onclick="delCookie('${esc(x.id)}')">🗑</button></div><div class="meta"><span>MAC: <b>${esc(x.mac)}</b></span><span>Exp: <b>${esc(x.expires)}</b></span></div></div>`).join(''):'<div class="empty">Tidak ada cookie.</div>'}</div>`; }); }
 
 /* ======================================================================
    LAPORAN
@@ -398,8 +402,8 @@ PAGES.laporan=async function(){
 };
 async function renderReport(){
   document.querySelectorAll('#rpTabs button').forEach(b=>b.classList.toggle('on',b.dataset.w===repWhich));
-  const b=$('#rpBody'); b.innerHTML=`<div class="loading"><span class="spin"></span></div>`;
-  try{ const r=await api('report',{which:repWhich}); window.__report=r;
+  const b=$('#rpBody');
+  const render=(r)=>{ window.__report=r;
     b.innerHTML=`<div class="card"><div class="kv"><span class="k">Periode</span><span class="v">${esc(r.label.toUpperCase())}</span></div>
       <div class="kv"><span class="k">Total Voucher</span><span class="v">${r.count}</span></div>
       <div class="kv"><span class="k">Total Pendapatan</span><span class="v">${esc(r.total_text)}</span></div>
@@ -407,8 +411,9 @@ async function renderReport(){
       <input class="input mb" placeholder="Cari…" oninput="document.querySelectorAll('#repList .item').forEach(it=>it.style.display=it.dataset.s.includes(this.value.toLowerCase())?'':'none')">
       <div class="list" id="repList">${r.rows.length?r.rows.map(x=>`<div class="item" data-s="${esc((x.user+' '+x.profile+' '+x.comment).toLowerCase())}">
         <div class="top"><div class="nm">${esc(x.user)}</div><span class="pill">${esc(money(r.currency,x.price))}</span></div>
-        <div class="meta"><span>${esc(x.date)} ${esc(x.time)}</span><span>Profil: <b>${esc(x.profile)}</b></span>${x.comment?`<span>Komentar: <b>${esc(x.comment)}</b></span>`:''}</div></div>`).join(''):'<div class="empty">Belum ada data. Pastikan profil memakai mode Record.</div>'}</div>`;
-  }catch(e){ b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+        <div class="meta"><span>${esc(x.date)} ${esc(x.time)}</span><span>Profil: <b>${esc(x.profile)}</b></span>${x.comment?`<span>Komentar: <b>${esc(x.comment)}</b></span>`:''}</div></div>`).join(''):'<div class="empty">Belum ada data. Pastikan profil memakai mode Record.</div>'}</div>`; };
+  const c=cachePeek('report',{which:repWhich}); if(c){ render(c); } else { b.innerHTML=`<div class="loading"><span class="spin"></span></div>`; }
+  try{ render(await apiCached('report',{which:repWhich})); }catch(e){ if(!c) b.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 }
 window.pdfReport=()=>{ const r=window.__report; if(!r)return;
   const rows=r.rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.date)}</td><td>${esc(x.time)}</td><td>${esc(x.user)}</td><td>${esc(x.profile)}</td><td>${esc(x.comment||'')}</td><td style="text-align:right">${esc(money(r.currency,x.price))}</td></tr>`).join('');
@@ -421,41 +426,46 @@ window.pdfReport=()=>{ const r=window.__report; if(!r)return;
 ====================================================================== */
 PAGES.peralatan=async function(){
   view().innerHTML=`<div class="page-title">Peralatan</div>
-    <div class="card"><h3><span class="dot"></span> Informasi MikroTik</h3><div id="toolInfo"><div class="loading"><span class="spin"></span></div></div></div>
+    <div class="card"><h3><span class="dot"></span> Informasi MikroTik</h3><div id="toolInfo"><div class="sub">memuat…</div></div></div>
     <div class="card"><h3><span class="dot"></span> Alat</h3>
       <div class="grid c2">
         <button class="btn pri" onclick="openServerProfiles()">🖥 Server Profil</button>
-        <button class="btn ok" onclick="openFiles()">📂 File Manager</button>
         <button class="btn dang" onclick="doReboot()">🔁 Reboot Router</button>
       </div></div>`;
-  try{ const s=await api('sysinfo'); const memPct=s.totalmem?Math.round((1-s.freemem/s.totalmem)*100):0;
+  const renderSys=s=>{ const memPct=s.totalmem?Math.round((1-s.freemem/s.totalmem)*100):0;
     $('#toolInfo').innerHTML=`
       <div class="kv"><span class="k">Identity</span><span class="v">${esc(s.identity)}</span></div>
       <div class="kv"><span class="k">RouterOS</span><span class="v">${esc(s.version)}</span></div>
       <div class="kv"><span class="k">Model</span><span class="v">${esc(s.model)}</span></div>
       <div class="kv"><span class="k">CPU</span><span class="v">${esc(s.cpu)}</span></div>
       <div class="kv"><span class="k">Memory</span><span class="v">${fmtBytes(s.freemem)} bebas${s.totalmem?' / '+fmtBytes(s.totalmem):''} (${memPct}% terpakai)</span></div>
-      <div class="kv"><span class="k">Uptime</span><span class="v">${esc(s.uptime)}</span></div>`;
-  }catch(e){ $('#toolInfo').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+      <div class="kv"><span class="k">Uptime</span><span class="v">${esc(s.uptime)}</span></div>`; };
+  const c=cachePeek('sysinfo'); if(c) renderSys(c);
+  try{ renderSys(await apiCached('sysinfo')); }catch(e){ if(!c) $('#toolInfo').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 };
+const HTML_DIRS=['hotspot','hotspot/alogin','hotspot2','flash/hotspot'];
+const LOGINBY=['cookie','http-chap','http-pap','https','mac','mac-cookie','trial'];
 window.doReboot=async()=>{ if(!confirmBox('Reboot router sekarang? Koneksi akan terputus sementara.'))return; try{ await api('reboot'); toast('Perintah reboot dikirim','ok'); }catch(e){ toast(e.message,'err'); } };
 window.openServerProfiles=async()=>{ const body=sheet('Server Profil','<div class="loading"><span class="spin"></span></div>');
   try{ const list=await api('serverprofiles'); body.innerHTML=list.length?list.map(p=>`<div class="item">
     <div class="top"><div class="nm">${esc(p.name)}</div><button class="btn sm ghost" onclick='editServerProfile(${JSON.stringify(p).replace(/'/g,"&#39;")})'>✏️</button></div>
     <div class="meta"><span>DNS: <b>${esc(p['dns-name']||'-')}</b></span><span>HTML: <b>${esc(p['html-directory']||'-')}</b></span><span>Login: <b>${esc(p['login-by']||'-')}</b></span></div></div>`).join(''):'<div class="empty">Tidak ada server profil.</div>';
   }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } };
-window.editServerProfile=(p)=>{ sheet('Edit Server Profil · '+p.name,`
-  <label class="fld"><span class="cap">DNS Name</span><input class="input" id="spDns" value="${esc(p['dns-name']||'')}"></label>
-  <label class="fld"><span class="cap">HTML Directory</span><input class="input" id="spHtml" value="${esc(p['html-directory']||'')}"></label>
-  <label class="fld"><span class="cap">Login By</span><input class="input" id="spLogin" value="${esc(p['login-by']||'')}" placeholder="cookie,http-chap,..."></label>
-  <label class="fld"><span class="cap">Hotspot Address</span><input class="input" id="spAddr" value="${esc(p['hotspot-address']||'')}"></label>
-  <button class="btn pri block" onclick="saveServerProfile('${esc(p.id)}')">💾 Simpan</button>`); };
-window.saveServerProfile=async(id)=>{ try{ await api('editserverprofile',{id,'dns-name':$('#spDns').value.trim(),'html-directory':$('#spHtml').value.trim(),'login-by':$('#spLogin').value.trim(),'hotspot-address':$('#spAddr').value.trim()}); toast('Disimpan','ok'); openServerProfiles(); }catch(e){toast(e.message,'err');} };
-window.openFiles=async()=>{ const body=sheet('File Manager','<div class="loading"><span class="spin"></span></div>');
-  try{ const list=await api('files'); body.innerHTML=`<div class="note">Unggah file ke MikroTik dilakukan lewat Winbox/FTP (tidak didukung API). Di sini bisa lihat & hapus.</div>`+
-    (list.length?list.map(f=>`<div class="item"><div class="top"><div class="nm" style="font-size:13px;word-break:break-all">${esc(f.name)}</div><button class="btn sm dang" onclick="delFile('${esc(f.id)}','${esc(f.name)}')">🗑</button></div><div class="meta"><span>${esc(f.type)}</span><span>${fmtBytes(f.size)}</span></div></div>`).join(''):'<div class="empty">Tidak ada file.</div>');
-  }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message)}</div>`; } };
-window.delFile=async(id,name)=>{ if(!confirmBox('Hapus file '+name+'?'))return; try{ await api('delfile',{id}); toast('Dihapus','ok'); openFiles(); }catch(e){toast(e.message,'err');} };
+window.editServerProfile=async(p)=>{
+  let dirs=[]; try{ dirs=await api('dirs'); }catch(e){}
+  const opts=Array.from(new Set(HTML_DIRS.concat(dirs).concat(p['html-directory']?[p['html-directory']]:[]))).filter(Boolean);
+  const cur=(p['login-by']||'').split(',').map(s=>s.trim()).filter(Boolean);
+  sheet('Edit Server Profil · '+p.name,`
+    <label class="fld"><span class="cap">DNS Name (terkunci)</span><input class="input" value="${esc(p['dns-name']||'-')}" disabled></label>
+    <label class="fld"><span class="cap">Hotspot Address (terkunci)</span><input class="input" value="${esc(p['hotspot-address']||'-')}" disabled></label>
+    <label class="fld"><span class="cap">HTML Directory</span><select class="input" id="spHtml">${opts.map(o=>`<option ${o===p['html-directory']?'selected':''}>${esc(o)}</option>`).join('')}</select></label>
+    <div class="fld"><span class="cap">Login By (boleh lebih dari satu)</span><div class="chks">${LOGINBY.map(l=>`<label class="chk"><input type="checkbox" value="${l}" ${cur.includes(l)?'checked':''}> ${l}</label>`).join('')}</div></div>
+    <button class="btn pri block" onclick="saveServerProfile('${esc(p.id)}')">💾 Simpan</button>`);
+};
+window.saveServerProfile=async(id)=>{
+  const logins=Array.from(document.querySelectorAll('#sheetBody .chk input:checked')).map(x=>x.value).join(',');
+  try{ await api('editserverprofile',{id,'html-directory':$('#spHtml').value,'login-by':logins}); toast('Disimpan','ok'); openServerProfiles(); }catch(e){toast(e.message,'err');}
+};
 
 /* ======================================================================
    PERATURAN (passcode + submenu)
@@ -532,15 +542,16 @@ function routerFormHtml(r,isNew){ r=r||{}; return `
   <div class="row2"><label class="fld"><span class="cap">Username</span><input class="input" id="rUser" value="${esc(r.user||'')}"></label>
     <label class="fld"><span class="cap">Password</span><input class="input" id="rPass" type="password" value="${esc(r.pass||'')}"></label></div>
   <div class="row2"><label class="fld"><span class="cap">Mata Uang</span><input class="input" id="rCur" value="${esc(r.currency||'Rp')}"></label>
-    <label class="fld"><span class="cap">Antarmuka Lalu Lintas</span><input class="input" id="rIface" value="${esc(r.iface||'ether1')}" placeholder="ether1"></label></div>
+    <label class="fld"><span class="cap">Antarmuka Lalu Lintas</span><select class="input" id="rIface"><option selected>${esc(r.iface||'ether1')}</option></select></label></div>
   <div class="note">Port API default 8728; lewat tunnel pakai port tunnelnya (mis. 7999). Aktifkan service <b>api</b> di MikroTik.</div>
   <div class="btnrow"><button class="btn pri" onclick="saveRouter(${isNew?'true':'false'})">💾 Simpan</button>
     <button class="btn ok" onclick="testRouter()">🔌 Connect</button><button class="btn ghost" onclick="pingRouter()">📶 Tes</button>
     ${isNew?'':`<button class="btn dang" onclick="delRouter('${esc(r.name)}')">🗑 Hapus</button>`}</div>
   <div id="rMsg" class="mt"></div>`; }
-function editRouterForm(r){ const h=$('#routerForm'); if(h) h.innerHTML=routerFormHtml(r,false); }
+function editRouterForm(r){ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml(r,false); fillIfaceOptions(r&&r.iface); } }
+async function fillIfaceOptions(current){ const sel=$('#rIface'); if(!sel)return; try{ const ifs=await api('interfaces'); let names=ifs.map(i=>i.name); if(current&&!names.includes(current)) names.unshift(current); sel.innerHTML=names.map(n=>`<option ${n===current?'selected':''}>${esc(n)}</option>`).join(''); }catch(e){} }
 function readRouterForm(){ return { name:($('#rName').value||'').trim(), hotspot:$('#rHot').value.trim(), host:$('#rHost').value.trim(), port:$('#rPort').value.trim()||'8728', user:$('#rUser').value.trim(), pass:$('#rPass').value, currency:$('#rCur').value.trim()||'Rp', iface:$('#rIface').value.trim() }; }
-window.newRouterForm=()=>{ const h=$('#routerForm'); if(h) h.innerHTML=routerFormHtml({port:'8728',currency:'Rp',iface:'ether1'},true); };
+window.newRouterForm=()=>{ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml({port:'8728',currency:'Rp',iface:'ether1'},true); fillIfaceOptions('ether1'); } };
 window.selRouter=()=>{ Store.session=$('#setSess').value; profileCache=null; editRouterForm(currentRouter()); };
 window.saveRouter=async(isNew)=>{ const o=readRouterForm(); if(!o.name){toast('Isi Nama Sesi','err');return;} if(!o.host){toast('Isi IP/Host','err');return;}
   if(isNew && Store.routers.some(x=>x.name===o.name)){ toast('Nama sesi sudah ada','err'); return; }
