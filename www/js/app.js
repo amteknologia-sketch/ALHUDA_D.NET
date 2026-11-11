@@ -135,7 +135,7 @@ PAGES.beranda=async function(){
     <div class="page-title">Beranda · ${esc(sel)}</div>
     <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"></span></h3><div id="indic"><div class="sub">memuat…</div></div></div>
     <div class="card"><h3><span class="dot"></span> Interface Padat</h3><div id="ifList"><div class="sub">—</div></div></div>
-    <div class="card"><h3><span class="dot"></span> 10 User Pemakaian Terbesar</h3><div id="topUsers"><div class="sub">—</div></div></div>
+    <div class="card"><h3><span class="dot"></span> 20 User Pemakaian Terbesar</h3><div id="topUsers"><div class="sub">—</div></div></div>
     <div class="grid c2 mt">
       <button class="btn pri" onclick="go('log')">📜 Log Hotspot</button>
       <button class="btn ok" onclick="pgTambah()">➕ Tambah Pengguna</button>

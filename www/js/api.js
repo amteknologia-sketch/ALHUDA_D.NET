@@ -173,7 +173,7 @@ async function api(action, params={}){
     health.forEach(h=>{ if((h.name==='temperature'||h.name==='cpu-temperature'||h.name==='board-temperature')&&h.value!=null) temp=parseFloat(h.value); if(h.temperature!=null) temp=parseFloat(h.temperature); if(h['cpu-temperature']!=null) temp=parseFloat(h['cpu-temperature']); });
     const sum=arr=>arr.reduce((a,s)=>a+(parseFloat((s.name||'').split('-|-')[3])||0),0);
     const countBy={}; actives.forEach(x=>{const s=x.server||'?';countBy[s]=(countBy[s]||0)+1;});
-    const tu=users.map(u=>({name:u.name||'?', total:(+(u['bytes-in']||0))+(+(u['bytes-out']||0))})).sort((a,b)=>b.total-a.total).slice(0,10);
+    const tu=users.map(u=>({name:u.name||'?', total:(+(u['bytes-in']||0))+(+(u['bytes-out']||0))})).sort((a,b)=>b.total-a.total).slice(0,20);
     const tif=rt.iface; const tifo=ifaces.find(i=>i.name===tif)||{};
     const dataBytes=(+(tifo['rx-byte']||0))+(+(tifo['tx-byte']||0));
     // monitor traffic (tahan-error: interface tak valid dilewati, tidak menggagalkan semua)
