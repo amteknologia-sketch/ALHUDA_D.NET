@@ -91,25 +91,40 @@ function priceOf(profiles,name){ const p=(profiles||[]).find(x=>x.name===name); 
    BOOT
 ====================================================================== */
 document.addEventListener('DOMContentLoaded', init);
+let AppMode='utama';
+function setMode(m){ AppMode=m; document.body.setAttribute('data-mode',m); }
 async function init(){
   document.documentElement.setAttribute('data-theme', Store.theme);
   applyBranding(); bindChrome();
-  if(!Store.routers.length){ go('peraturan'); return; }
-  await loadSessions(); go('beranda');
+  if(!Store.routers.length){ setMode('beranda'); go('peraturan'); return; }
+  await loadSessions();
+  setMode('utama'); renderUtama();
 }
 function applyBranding(){ $('#appName').textContent=Store.appName; const img=$('#appLogo'); if(Store.logo){img.src=Store.logo;img.style.display='inline-block';}else{img.style.display='none';} document.title=Store.appName; }
 function bindChrome(){
-  $('#refreshBtn').onclick=()=>go(currentRoute,true);
-  $('#sessionSel').onchange=e=>{ Store.session=e.target.value; profileCache=null; go(currentRoute,true); };
+  $('#refreshBtn').onclick=()=>{ if(AppMode==='utama') renderUtama(true); else go(currentRoute,true); };
+  $('#themeBtn').onclick=openThemePicker;
+  $('#switchBtn').onclick=onSwitch;
   document.querySelectorAll('.tabbar a').forEach(a=>a.onclick=()=>go(a.dataset.route));
 }
+function onSwitch(){
+  if(AppMode==='utama'){ if(Store.adminOk){ setMode('beranda'); go('beranda'); } else askAdminPass(); }
+  else { setMode('utama'); renderUtama(); }
+}
+function askAdminPass(){ sheet('Masukkan Password',`
+  <label class="fld"><span class="cap">Password</span><input class="input" id="swPass" type="password" placeholder="password"></label>
+  <button class="btn pri block" onclick="trySwitchPass()">Beralih ke Beranda</button>
+  <div id="swMsg" class="mt"></div>`);
+  setTimeout(()=>{ const i=$('#swPass'); if(i) i.focus(); },120); }
+window.trySwitchPass=()=>{ if($('#swPass').value==='zakas11'){ Store.adminOk=true; closeSheet(); setMode('beranda'); go('beranda'); } else { $('#swMsg').innerHTML='<span class="pill off">Password salah</span>'; } };
+function openThemePicker(){ sheet('Ganti Tema',`<div class="btnrow wrap">${['light:Terang','dark:Gelap','blue:Biru','pink:Pink','green:Hijau'].map(t=>{const[v,l]=t.split(':');return `<button class="btn ${Store.theme===v?'pri':'ghost'}" onclick="setTheme('${v}');closeSheet();">${l}</button>`;}).join('')}</div>`); }
 async function loadSessions(){
   const sel=$('#sessionSel');
   try{ const list=await api('sessions');
-    sel.innerHTML=list.map(s=>`<option value="${esc(s.session)}">${esc(s.hotspot||s.session)}</option>`).join('');
+    if(sel) sel.innerHTML=list.map(s=>`<option value="${esc(s.session)}">${esc(s.hotspot||s.session)}</option>`).join('');
     if(!Store.session || !list.find(s=>s.session===Store.session)) Store.session=list[0]?.session||'';
-    sel.value=Store.session;
-  }catch(e){ sel.innerHTML='<option>—</option>'; }
+    if(sel) sel.value=Store.session;
+  }catch(e){ if(sel) sel.innerHTML='<option>—</option>'; }
 }
 
 /* ======================================================================
@@ -131,7 +146,7 @@ const PAGES={};
 ====================================================================== */
 PAGES.beranda=async function(){
   _liveSnap=null;
-  const sel=$('#sessionSel').selectedOptions[0]?.textContent||'';
+  const rt=currentRouter(); const sel=(rt&&(rt.hotspot||rt.name))||'';
   view().innerHTML=`
     <div class="page-title">Beranda · ${esc(sel)}</div>
     <div class="card"><h3><span class="dot"></span> Indikator <span id="indSpin" style="margin-left:auto"></span></h3><div id="indic"><div class="sub">memuat…</div></div></div>
@@ -151,12 +166,12 @@ PAGES.beranda=async function(){
 };
 function renderHome(d){
   const cur=d.currency||'Rp'; const memPct=d.totalmem?Math.round((1-d.freemem/d.totalmem)*100):0;
-  const dataGB=(d.userDataBytes||0)/1073741824;
+  const dataTB=(d.userDataBytes||0)/1099511627776;
   const indic=$('#indic'); if(indic){ indic.innerHTML=
     meterHTML('mCpu','Beban CPU',d.cpu_raw,100,{display:d.cpu})+
     meterHTML('mMem','Memori Tersedia',memPct,100,{display:fmtBytes(d.freemem)+(d.totalmem?' / '+fmtBytes(d.totalmem):'')})+
     meterHTML('mTemp','Temperature (Health)',(d.temp||0),50,{yellow:35,red:40,display:(d.temp!=null?d.temp+'°C':'N/A')})+
-    meterHTML('mData','Total Data',dataGB,10000,{yellow:8000,red:9000,display:fmtBytes(d.userDataBytes||0)+' ('+dataGB.toFixed(2)+' GB)'})+
+    meterHTML('mData','Total Data',dataTB,30,{yellow:20,red:25,display:fmtBytes(d.userDataBytes||0)})+
     meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
     meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'})+
     meterHTML('mIncM','Pendapatan Bulan ini',d.income_month,6000000,{display:money(cur,d.income_month)})+
@@ -211,6 +226,145 @@ function renderTopLive(list){ const h=$('#topLive'); if(!h)return;
   h.innerHTML=list.map((u,i)=>{ const v='↓'+u.down.toFixed(2)+' ↑'+u.up.toFixed(2)+' = '+u.tot.toFixed(2)+' Mbps';
     return `<div class="mb"><div class="kv"><span class="k">${i+1}. ${esc(u.name)}</span><span class="v">${v}</span></div>${meterBar(u.tot,30,{yellow:20,red:25})}</div>`;
   }).join(''); }
+
+/* ======================================================================
+   HALAMAN UTAMA (mode pengguna) — tanpa menu navigasi
+====================================================================== */
+const MON3={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+const MONID=['jan','feb','mar','apr','mei','jun','jul','agu','sep','okt','nov','des'];
+function p2(n){ return String(n).padStart(2,'0'); }
+function parseExpiry(comment){ if(!comment) return null; const c=String(comment).trim().toLowerCase();
+  let m=c.match(/^([a-z]{3})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  if(m&&MON3[m[1]]!=null) return new Date(+m[3],MON3[m[1]],+m[2],+m[4],+m[5],+m[6]);
+  m=c.match(/^([a-z]{3})\/(\d{1,2})\/(\d{4})/);
+  if(m&&MON3[m[1]]!=null) return new Date(+m[3],MON3[m[1]],+m[2],23,59,59);
+  return null; }
+function fmtTanggal(d){ return d.getDate()+' '+MONID[d.getMonth()]+' '+d.getFullYear(); }
+
+let _boundSnap=null;
+async function renderUtama(force){
+  clearTimers(); closeSheet(); setMode('utama'); _boundSnap=null;
+  view().innerHTML=`
+    <div class="page-title">${esc(Store.appName)}</div>
+    <div class="card"><h3><span class="dot"></span> Status Jaringan <span id="uSpin" style="margin-left:auto"></span></h3><div id="uIndic"><div class="sub">memuat…</div></div></div>
+    <div id="uBody"></div>
+    <div class="card"><h3><span class="dot"></span> 5 Interface Padat</h3><div id="ifList"><div class="sub">—</div></div></div>`;
+  renderUtamaBody();
+  const cached=cachePeek('home'); if(cached){ paintUtamaIndic(cached); renderIfaces(cached.interfaces); } else { $('#uSpin').innerHTML='<span class="spin"></span>'; }
+  try{ const d=await apiCached('home'); paintUtamaIndic(d); renderIfaces(d.interfaces); $('#uSpin').innerHTML=''; startTrafficPollUtama(); }
+  catch(e){ $('#uSpin').innerHTML=''; if(!cached) $('#uIndic').innerHTML=`<div class="empty">${esc(e.message)}</div>`; else startTrafficPollUtama(); }
+}
+function paintUtamaIndic(d){ const el=$('#uIndic'); if(!el)return; const dataTB=(d.userDataBytes||0)/1099511627776;
+  el.innerHTML=
+    meterHTML('mData','Total Data',dataTB,30,{yellow:20,red:25,display:fmtBytes(d.userDataBytes||0)})+
+    meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
+    meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'}); }
+function startTrafficPollUtama(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps); const tot=dM+uM;
+  updateMeter('mTraf',tot,200,{yellow:150,red:180,display:tot.toFixed(2)+' Mbps  (↓'+dM.toFixed(1)+' ↑'+uM.toFixed(1)+')'}); }catch(e){} };
+  tick(); timers.push(setInterval(tick,4000)); }
+
+function renderUtamaBody(){ const b=$('#uBody'); if(!b)return;
+  if(!Store.boundUser){
+    b.innerHTML=`<div class="card"><h3><span class="dot"></span> Masuk</h3>
+      <label class="fld"><span class="cap">Masukkan Kode Voucer</span><input class="input" id="uCode" placeholder="kode voucer / username" onkeydown="if(event.key==='Enter')doHubungkan()"></label>
+      <button class="btn pri block" onclick="doHubungkan()">🔌 Hubungkan</button>
+      <div id="uLoginMsg" class="mt"></div></div>`;
+  } else {
+    b.innerHTML=`<div id="boundWrap"><div class="loading"><span class="spin"></span> Memuat data pengguna…</div></div>`;
+    loadBound();
+  }
+}
+window.doHubungkan=async()=>{ const code=($('#uCode').value||'').trim(); const msg=$('#uLoginMsg');
+  if(!code){ msg.innerHTML='<span class="pill off">Isi kode voucer</span>'; return; }
+  msg.innerHTML='<span class="spin"></span> Menghubungkan…';
+  try{ await api('userinfo',{name:code}); Store.boundUser=code; renderUtamaBody(); }
+  catch(e){ msg.innerHTML='<span class="pill off">'+esc(e.message)+'</span>'; } };
+
+async function loadBound(){ const name=Store.boundUser; const w=$('#boundWrap'); if(!w)return;
+  try{ const [info,act,cookies]=await Promise.all([api('userinfo',{name}),api('useractive',{name}),api('usercookies',{name})]);
+    window.__boundProfile=info.profile; w.innerHTML=boundHTML(info);
+    paintBoundOnline(act,info,{}); paintBoundCookies(cookies); startKadaluarsa(info.comment); startBoundPoll(info.shared);
+  }catch(e){ w.innerHTML=`<div class="card"><div class="empty">${esc(e.message)}</div><button class="btn ghost block mt" onclick="utamaKeluar()">Keluar</button></div>`; } }
+function boundHTML(info){ const used=info.bytesIn+info.bytesOut; return `
+  <div class="card">
+    <div class="ubig">${esc(info.name)}</div>
+    <div class="urow"><span>Profil : <b>${esc(info.profile)}</b></span><span class="pill" id="onCount">…/… online</span></div>
+    <div id="maxNotif"></div>
+    <div class="g11 mt">
+      <div class="box21"><div class="bx-l">Penggunaan</div><div class="bx-v" id="useVal">${fmtBytes(used)}</div><div class="bx-s">Download + Upload</div></div>
+      <div class="box21"><div class="bx-l">Kadaluarsa</div><div class="bx-v" id="kadTimer">—</div><div class="bx-s" id="kadEnd"></div></div>
+    </div>
+  </div>
+  <div class="card"><h3><span class="dot"></span> Daftar Online <span id="onHdr" style="margin-left:auto;color:var(--muted)"></span></h3><div id="boundOnline"><div class="sub">—</div></div></div>
+  <div class="card"><h3><span class="dot"></span> Daftar Cookie</h3><div id="boundCookie"><div class="sub">—</div></div></div>
+  <div class="card"><h3><span class="dot"></span> Akun</h3>
+    <div class="g11">
+      <button class="btn ghost" onclick="toggleEdit('${esc(info.id)}')">✏️ Edit Username</button>
+      <button class="btn dang" onclick="utamaKeluar()">⏻ Keluar</button>
+    </div>
+  </div>
+  <div id="editWrap"></div>`; }
+window.toggleEdit=(id)=>{ const w=$('#editWrap'); if(!w)return;
+  if(w.innerHTML.trim()){ w.innerHTML=''; return; }
+  w.innerHTML=`<div class="card"><h3><span class="dot"></span> Edit Username</h3>
+    <label class="fld"><span class="cap">Username Lama</span><input class="input" id="euOld" value="${esc(Store.boundUser)}" readonly></label>
+    <label class="fld"><span class="cap">Username Baru</span><input class="input" id="euNew" placeholder="username baru"></label>
+    <label class="fld"><span class="cap">Ulangi Username Baru</span><input class="input" id="euNew2" placeholder="ulangi username baru"></label>
+    <button class="btn pri block" onclick="doRename('${esc(id)}')">💾 Simpan</button>
+    <div id="euResult" class="mt"></div></div>`;
+  w.scrollIntoView({behavior:'smooth'}); };
+
+function paintBoundOnline(list,info,rates){ rates=rates||{}; const y=info.shared||0, x=list.length;
+  const oc=$('#onCount'); if(oc) oc.textContent=x+'/'+(y||'?')+' online';
+  const oh=$('#onHdr'); if(oh) oh.textContent=x+'/'+(y||'?');
+  const mn=$('#maxNotif'); if(mn) mn.innerHTML=(y&&x>=y)?'<div class="notif-max">⚠️ Telah melampaui maksimal online.</div>':'';
+  const h=$('#boundOnline'); if(!h)return;
+  h.innerHTML=x?list.map(s=>{ const r=rates[s.id]||{up:0,down:0}; return `<div class="item">
+    <div class="top"><div class="nm">${esc(s.server||'-')}</div></div>
+    <div class="meta"><span>Perangkat: <b>${esc(s.host||'-')}</b></span><span>IP: <b>${esc(s.address)}</b></span></div>
+    <div class="meta"><span>MAC: <b>${esc(s.mac)}</b></span><span>Terkoneksi: <b>${esc(s.uptime)}</b></span></div>
+    <div class="meta"><span>Lalu Lintas: <b>${fmtBytes(s.bin+s.bout)}</b></span></div>
+    <div class="mb"><div class="kv"><span class="k">UP</span><span class="v">${r.up.toFixed(2)} Mbps</span></div>${meterBar(r.up,20,{yellow:15,red:20})}</div>
+    <div class="mb"><div class="kv"><span class="k">DOWN</span><span class="v">${r.down.toFixed(2)} Mbps</span></div>${meterBar(r.down,20,{yellow:15,red:20})}</div>
+    <button class="btn dang block mt" onclick="kickBound('${esc(s.id)}')">⏏ Keluarkan</button>
+  </div>`; }).join(''):'<div class="sub">Tidak ada perangkat online.</div>'; }
+function paintBoundCookies(list){ const h=$('#boundCookie'); if(!h)return;
+  h.innerHTML=list.length?list.map(c=>`<div class="item">
+    <div class="top"><div class="nm">${esc(c.server||'-')}</div><span class="pill ${c.online?'ok':'off'}">${c.online?'online':'offline'}</span></div>
+    <div class="meta"><span>MAC: <b>${esc(c.mac||'-')}</b></span><span>IP: <b>${esc(c.address||'-')}</b></span></div>
+    <div class="meta"><span>Perangkat: <b>${esc(c.host||'-')}</b></span><span>Data: <b>${c.data!=null?fmtBytes(c.data):'-'}</b></span></div>
+    <div class="meta"><span>Berlaku: <b>${esc(c.expires||'-')}</b></span></div>
+    <button class="btn dang block mt" onclick="delCookieBound('${esc(c.id)}')">🗑 Hapus</button>
+  </div>`).join(''):'<div class="sub">Tidak ada cookie.</div>'; }
+function startKadaluarsa(comment){ const exp=parseExpiry(comment); const t=$('#kadTimer'), end=$('#kadEnd');
+  if(!exp){ if(t) t.textContent='Belum aktif'; if(end) end.textContent='(mulai saat login pertama)'; return; }
+  if(end) end.textContent='s/d '+fmtTanggal(exp);
+  const upd=()=>{ const el=$('#kadTimer'); if(!el)return; let ms=exp-Date.now();
+    if(ms<=0){ el.textContent='Kadaluarsa'; return; }
+    const d=Math.floor(ms/86400000); ms-=d*86400000; const h=Math.floor(ms/3600000); ms-=h*3600000; const mi=Math.floor(ms/60000); ms-=mi*60000; const se=Math.floor(ms/1000);
+    el.innerHTML=d+' Hari<br>'+p2(h)+':'+p2(mi)+':'+p2(se); };
+  upd(); timers.push(setInterval(upd,1000)); }
+function startBoundPoll(shared){ const tick=async()=>{ const name=Store.boundUser; if(!name)return;
+  try{ const [info,act,cookies]=await Promise.all([api('userinfo',{name}),api('useractive',{name}),api('usercookies',{name})]);
+    const now=Date.now(); const rates={}; const cur={}; act.forEach(s=>cur[s.id]=s);
+    if(_boundSnap){ const dt=(now-_boundSnap.t)/1000; if(dt>0.5){ for(const id in cur){ const p=_boundSnap.d[id]; if(!p)continue;
+      rates[id]={ down:Math.max(0,cur[id].bout-p.bout)*8/dt/1e6, up:Math.max(0,cur[id].bin-p.bin)*8/dt/1e6 }; } } }
+    _boundSnap={t:now,d:cur};
+    const uv=$('#useVal'); if(uv) uv.textContent=fmtBytes(info.bytesIn+info.bytesOut);
+    paintBoundOnline(act,info,rates); paintBoundCookies(cookies);
+  }catch(e){} };
+  tick(); timers.push(setInterval(tick,4000)); }
+window.kickBound=async(id)=>{ if(!confirmBox('Keluarkan perangkat ini?'))return; try{ await api('kick',{id}); toast('Dikeluarkan','ok'); _boundSnap=null; }catch(e){ toast(e.message,'err'); } };
+window.delCookieBound=async(id)=>{ if(!confirmBox('Hapus cookie ini?'))return; try{ await api('delcookie',{id}); toast('Dihapus','ok'); }catch(e){ toast(e.message,'err'); } };
+window.utamaKeluar=()=>{ if(!confirmBox('Keluar dari pengguna ini?'))return; Store.boundUser=''; renderUtama(); };
+window.doRename=async(id)=>{ const a=($('#euNew').value||'').trim(), b=($('#euNew2').value||'').trim();
+  if(!a){ toast('Isi username baru','err'); return; }
+  if(a!==b){ toast('Username baru tidak sama','err'); return; }
+  try{ await api('renameuser',{id,name:a}); Store.boundUser=a; _boundSnap=null; toast('Username diubah','ok');
+    const old=$('#euOld'); if(old) old.value=a; $('#euNew').value=''; $('#euNew2').value='';
+    const v={user:a,profile:window.__boundProfile||'',comment:'',price:'-'};
+    $('#euResult').innerHTML=voucherResultCard([v]);
+  }catch(e){ toast(e.message,'err'); } };
 
 /* shared active-detail list (User, Server, Mac, IP, Download, Upload, Total) + search + sort */
 let _activeCache=[], _activeSort='total', _activeFilterServer='';
@@ -514,6 +668,7 @@ let perSub=null;
 PAGES.peraturan=async function(){
   setNav('peraturan');
   if(!Store.routers.length){ perUnlocked=true; } // first run: allow add router
+  if(Store.adminOk){ perUnlocked=true; } // sudah lolos switch password
   if(!perUnlocked){ return renderPasscode(); }
   if(perSub) return renderPerSub(perSub);
   view().innerHTML=`<div class="page-title">Peraturan</div>
@@ -523,6 +678,7 @@ PAGES.peraturan=async function(){
       <div class="item" onclick="openSub('logo')" style="cursor:pointer"><div class="top"><div class="nm">🖼 Logo</div><span style="color:var(--muted)">›</span></div></div>
       <div class="item" onclick="openSub('tema')" style="cursor:pointer"><div class="top"><div class="nm">🎨 Tema Aplikasi</div><span style="color:var(--muted)">›</span></div></div>
       <div class="item" onclick="openSub('pdf')" style="cursor:pointer"><div class="top"><div class="nm">🧾 Template Cetak PDF</div><span style="color:var(--muted)">›</span></div></div>
+      <div class="item" onclick="clearAdminPass()" style="cursor:pointer"><div class="top"><div class="nm">🔑 Hapus Password Switch</div><span style="color:var(--muted)">${Store.adminOk?'aktif':'—'}</span></div></div>
     </div>
     <div class="card"><div class="sub center">ALHUDA_D.NET · mode langsung ke router · v3.0</div></div>`;
 };
@@ -535,6 +691,7 @@ function renderPasscode(){
       <div id="pcMsg" class="mt"></div></div>`;
 }
 window.checkPasscode=()=>{ if($('#pcode').value==='zakas11'){ perUnlocked=true; perSub=null; go('peraturan'); } else { $('#pcMsg').innerHTML='<span class="pill off">Kode salah</span>'; } };
+window.clearAdminPass=()=>{ if(!Store.adminOk){ toast('Password belum aktif','');return; } if(!confirmBox('Hapus password switch? Nanti akan diminta password lagi saat beralih ke Beranda.'))return; Store.adminOk=false; toast('Password dihapus','ok'); go('peraturan'); };
 window.openSub=(s)=>{ perSub=s; renderPerSub(s); };
 window.perBack=()=>{ perSub=null; go('peraturan'); };
 function renderPerSub(s){ ({router:subRouter,app:subApp,logo:subLogo,tema:subTema,pdf:subPdf}[s])(); }
@@ -558,7 +715,7 @@ window.saveLogoLocal=()=>{ if(!pendingLogo){toast('Pilih file dulu','err');retur
 function subTema(){ view().innerHTML=subHead('Tema Aplikasi')+`<div class="card"><div class="btnrow">
   ${['light:Terang','dark:Gelap','blue:Biru','pink:Pink','green:Hijau'].map(t=>{const[v,l]=t.split(':');return `<button class="btn ${Store.theme===v?'pri':'ghost'}" onclick="setTheme('${v}')">${l}</button>`;}).join('')}
   </div></div>`; }
-window.setTheme=(t)=>{ Store.theme=t; document.documentElement.setAttribute('data-theme',t); subTema(); };
+window.setTheme=(t)=>{ Store.theme=t; document.documentElement.setAttribute('data-theme',t); if(AppMode==='beranda'&&perSub==='tema') subTema(); };
 
 function subPdf(){ view().innerHTML=subHead('Template Cetak PDF')+`<div class="card">
   <div class="note">Template tiket memakai Logo + harga + masa aktif + QR + Catatan Voucher. Pratinjau:</div>
@@ -587,18 +744,23 @@ function routerFormHtml(r,isNew){ r=r||{}; return `
   <div class="fld"><span class="cap">Interface Dikecualikan dari "Interface Padat" (boleh &gt;1)</span><div class="chks" id="rExcl"><span class="sub">tekan Connect/Tes untuk memuat daftar interface…</span></div></div>
   <div class="note">Port API default 8728; lewat tunnel pakai port tunnelnya (mis. 7999). Aktifkan service <b>api</b> di MikroTik.</div>
   <div class="btnrow"><button class="btn pri" onclick="saveRouter(${isNew?'true':'false'})">💾 Simpan</button>
+    <button class="btn warn" onclick="editCurrentRouter()">✏️ Edit</button>
     <button class="btn ok" onclick="testRouter()">🔌 Connect</button><button class="btn ghost" onclick="pingRouter()">📶 Tes</button>
     ${isNew?'':`<button class="btn dang" onclick="delRouter('${esc(r.name)}')">🗑 Hapus</button>`}</div>
   <div id="rMsg" class="mt"></div>`; }
 function editRouterForm(r){ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml(r,false); fillIfaceOptions(r&&r.iface, r&&r.exclude); } }
 async function fillIfaceOptions(current,exclude){ const sel=$('#rIface'); exclude=exclude||[];
-  try{ const ifs=await api('interfaces'); let names=ifs.map(i=>i.name); if(current&&!names.includes(current)) names.unshift(current);
+  const render=(names)=>{ names=names.slice(); if(current&&!names.includes(current)) names.unshift(current);
+    exclude.forEach(n=>{ if(!names.includes(n)) names.push(n); });
     if(sel) sel.innerHTML=names.map(n=>`<option ${n===current?'selected':''}>${esc(n)}</option>`).join('');
-    const ex=$('#rExcl'); if(ex) ex.innerHTML=names.length?names.map(n=>`<label class="chk"><input type="checkbox" value="${esc(n)}" ${exclude.includes(n)?'checked':''}> ${esc(n)}</label>`).join(''):'<span class="sub">tidak ada interface</span>';
-  }catch(e){ const ex=$('#rExcl'); if(ex&&exclude.length) ex.innerHTML=exclude.map(n=>`<label class="chk"><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>`).join(''); }
+    const ex=$('#rExcl'); if(ex) ex.innerHTML=names.length?names.map(n=>`<label class="chk"><input type="checkbox" value="${esc(n)}" ${exclude.includes(n)?'checked':''}> ${esc(n)}</label>`).join(''):'<span class="sub">tidak ada interface</span>'; };
+  try{ const ifs=await api('interfaces'); render(ifs.map(i=>i.name)); }
+  catch(e){ render([]); }
 }
 function readRouterForm(){ return { name:($('#rName').value||'').trim(), hotspot:$('#rHot').value.trim(), host:$('#rHost').value.trim(), port:$('#rPort').value.trim()||'8728', user:$('#rUser').value.trim(), pass:$('#rPass').value, currency:$('#rCur').value.trim()||'Rp', iface:$('#rIface').value.trim(), exclude:Array.from(document.querySelectorAll('#rExcl input:checked')).map(x=>x.value) }; }
-window.newRouterForm=()=>{ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml({port:'8728',currency:'Rp',iface:'ether1'},true); fillIfaceOptions('ether1',[]); } };
+const ROUTER_DEFAULT={name:'ALHUDA',hotspot:'ALHUDA_D.NET',host:'10.10.10.1',port:'8728',user:'zakas',pass:'zakas',currency:'Rp',iface:'eth1',exclude:['eth1','eth2','eth3','eth4','eth5','eth6','eth7']};
+window.editCurrentRouter=()=>{ const r=currentRouter(); if(r){ editRouterForm(r); } else { newRouterForm(); } };
+window.newRouterForm=()=>{ const h=$('#routerForm'); if(h){ h.innerHTML=routerFormHtml(ROUTER_DEFAULT,true); fillIfaceOptions(ROUTER_DEFAULT.iface,ROUTER_DEFAULT.exclude.slice()); } };
 window.selRouter=()=>{ Store.session=$('#setSess').value; profileCache=null; editRouterForm(currentRouter()); };
 window.saveRouter=async(isNew)=>{ const o=readRouterForm(); if(!o.name){toast('Isi Nama Sesi','err');return;} if(!o.host){toast('Isi IP/Host','err');return;}
   if(isNew && Store.routers.some(x=>x.name===o.name)){ toast('Nama sesi sudah ada','err'); return; }

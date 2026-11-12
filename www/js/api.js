@@ -13,6 +13,8 @@ const Store = {
   get vnote(){ return localStorage.getItem('ad_vnote')||'Sebelum Login :d.net Ubah Privasi ke MAC Ponsel / Perangkat'; }, set vnote(v){ localStorage.setItem('ad_vnote',v); },
   get routers(){ try{ return JSON.parse(localStorage.getItem('ad_routers')||'[]'); }catch(e){ return []; } },
   set routers(v){ localStorage.setItem('ad_routers', JSON.stringify(v)); },
+  get boundUser(){ return localStorage.getItem('ad_bound')||''; }, set boundUser(v){ if(v) localStorage.setItem('ad_bound',v); else localStorage.removeItem('ad_bound'); },
+  get adminOk(){ return localStorage.getItem('ad_adminok')==='1'; }, set adminOk(v){ if(v) localStorage.setItem('ad_adminok','1'); else localStorage.removeItem('ad_adminok'); },
 };
 
 /* ---------- cache (untuk mode offline / tanpa loading) ---------- */
@@ -158,6 +160,52 @@ async function api(action, params={}){
     const rt=requireRouter();
     const rows=await ros(rt,'/ip/hotspot/active/print',{'.proplist':'user,bytes-in,bytes-out'});
     return rows.map(a=>({ user:a.user||'?', bin:+(a['bytes-in']||0), bout:+(a['bytes-out']||0) }));
+  }
+
+  case 'userinfo': {
+    const rt=requireRouter(); const name=params.name;
+    const u=(await ros(rt,'/ip/hotspot/user/print',{},{name}))[0];
+    if(!u) throw new Error('Kode voucer / user tidak ditemukan: '+name);
+    let shared=1;
+    try{ const pr=(await ros(rt,'/ip/hotspot/user/profile/print',{'.proplist':'name,shared-users'},{name:u.profile||'default'}))[0];
+      if(pr&&pr['shared-users']) shared=parseInt(pr['shared-users'],10)||1; }catch(e){}
+    return { id:u['.id']||'', name:u.name||'', profile:u.profile||'', comment:u.comment||'',
+      bytesIn:+(u['bytes-in']||0), bytesOut:+(u['bytes-out']||0), uptime:u.uptime||'',
+      limitUptime:u['limit-uptime']||'', disabled:(u.disabled==='true'), shared };
+  }
+
+  case 'useractive': {
+    const rt=requireRouter(); const name=params.name;
+    const [rows,leases]=await Promise.all([
+      ros(rt,'/ip/hotspot/active/print',{},{user:name}),
+      ros(rt,'/ip/dhcp-server/lease/print',{'.proplist':'mac-address,host-name'}).catch(()=>[]),
+    ]);
+    const hn={}; leases.forEach(l=>{ const m=(l['mac-address']||'').toLowerCase(); if(m) hn[m]=l['host-name']||''; });
+    return rows.map(a=>({ id:a['.id']||'', server:a.server||'', address:a.address||'', mac:a['mac-address']||'',
+      host:hn[(a['mac-address']||'').toLowerCase()]||'', uptime:a.uptime||'', bin:+(a['bytes-in']||0), bout:+(a['bytes-out']||0) }));
+  }
+
+  case 'usercookies': {
+    const rt=requireRouter(); const name=params.name;
+    const [ck,act,leases]=await Promise.all([
+      ros(rt,'/ip/hotspot/cookie/print',{},{user:name}),
+      ros(rt,'/ip/hotspot/active/print',{},{user:name}),
+      ros(rt,'/ip/dhcp-server/lease/print',{'.proplist':'mac-address,host-name'}).catch(()=>[]),
+    ]);
+    const hn={}; leases.forEach(l=>{ const m=(l['mac-address']||'').toLowerCase(); if(m) hn[m]=l['host-name']||''; });
+    const am={}; act.forEach(a=>{ const m=(a['mac-address']||'').toLowerCase(); am[m]={server:a.server||'',address:a.address||'',bytes:(+(a['bytes-in']||0))+(+(a['bytes-out']||0))}; });
+    return ck.map(c=>{ const m=(c['mac-address']||'').toLowerCase(); const on=am[m];
+      return { id:c['.id']||'', mac:c['mac-address']||'', host:hn[m]||'', server:(on&&on.server)||'', address:(on&&on.address)||'',
+        data:(on?on.bytes:null), expires:c['expires-in']||'', online:!!on }; });
+  }
+
+  case 'renameuser': {
+    const rt=requireRouter(); const id=params.id, name=(params.name||'').trim();
+    if(!name) throw new Error('Nama baru wajib diisi.');
+    const dup=await ros(rt,'/ip/hotspot/user/print',{'.proplist':'.id,name'},{name});
+    if(dup.some(d=>d['.id']!==id)) throw new Error('Nama "'+name+'" sudah dipakai.');
+    await ros(rt,'/ip/hotspot/user/set',{'.id':id, name, password:name});
+    return { name };
   }
 
   case 'home': {
