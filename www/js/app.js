@@ -174,7 +174,7 @@ function renderHome(d){
     meterHTML('mCpu','Beban CPU',d.cpu_raw,100,{display:d.cpu})+
     meterHTML('mMem','Memori Tersedia',memPct,100,{display:fmtBytes(d.freemem)+(d.totalmem?' / '+fmtBytes(d.totalmem):'')})+
     meterHTML('mTemp','Temperature (Health)',(d.temp||0),50,{yellow:35,red:40,display:(d.temp!=null?d.temp+'°C':'N/A')})+
-    meterHTML('mData','Total Data',dataTB,30,{yellow:20,red:25,display:fmtBytes(d.userDataBytes||0)})+
+    meterHTML('mData','Total Data',dataTB,12,{yellow:8,red:10,display:fmtBytes(d.userDataBytes||0)})+
     meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
     meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'})+
     meterHTML('mIncM','Pendapatan Bulan ini',d.income_month,6000000,{display:money(cur,d.income_month)})+
@@ -259,7 +259,7 @@ async function renderUtama(force){
 }
 function paintUtamaIndic(d){ const el=$('#uIndic'); if(!el)return; const dataTB=(d.userDataBytes||0)/1099511627776;
   el.innerHTML=
-    meterHTML('mData','Total Data',dataTB,30,{yellow:20,red:25,display:fmtBytes(d.userDataBytes||0)})+
+    meterHTML('mData','Total Data',dataTB,12,{yellow:8,red:10,display:fmtBytes(d.userDataBytes||0)})+
     meterHTML('mAct','Hotspot Aktif',d.active,100,{yellow:70,red:90,display:d.active+' Online'})+
     meterHTML('mTraf','Lalu Lintas (Download + Upload)',0,200,{yellow:150,red:180,display:'…'}); }
 function startTrafficPollUtama(){ const tick=async()=>{ try{ const t=await api('traffic'); const dM=mbps(t.rx_bps),uM=mbps(t.tx_bps); const tot=dM+uM;
@@ -290,7 +290,7 @@ async function loadBound(){ const name=Store.boundUser; const w=$('#boundWrap');
   }catch(e){ w.innerHTML=`<div class="card"><div class="empty">${esc(e.message)}</div><button class="btn ghost block mt" onclick="utamaKeluar()">Keluar</button></div>`; } }
 function boundHTML(info){ const used=info.bytesIn+info.bytesOut; return `
   <div class="card">
-    <div class="ubig">${esc(info.name)}</div>
+    <div class="ubig" id="ubig">${esc(info.name)}</div>
     <div class="urow"><span>Profil : <b>${esc(info.profile)}</b></span><span class="pill" id="onCount">…/… online</span></div>
     <div id="maxNotif"></div>
     <div class="g11 mt">
@@ -361,12 +361,15 @@ window.kickBound=async(id)=>{ if(!confirmBox('Keluarkan perangkat ini?'))return;
 window.delCookieBound=async(id)=>{ if(!confirmBox('Hapus cookie ini?'))return; try{ await api('delcookie',{id}); toast('Dihapus','ok'); }catch(e){ toast(e.message,'err'); } };
 window.utamaKeluar=()=>{ if(!confirmBox('Keluar dari pengguna ini?'))return; Store.boundUser=''; renderUtama(); };
 window.doRename=async(id)=>{ const a=($('#euNew').value||'').trim(), b=($('#euNew2').value||'').trim();
+  const lama=Store.boundUser;
   if(!a){ toast('Isi username baru','err'); return; }
   if(a!==b){ toast('Username baru tidak sama','err'); return; }
   try{ await api('renameuser',{id,name:a}); Store.boundUser=a; _boundSnap=null; toast('Username diubah','ok');
+    try{ const log=Store.renameLog; log.unshift({old:lama,neo:a,at:Date.now()}); Store.renameLog=log.slice(0,100); }catch(_){ }
     const old=$('#euOld'); if(old) old.value=a; $('#euNew').value=''; $('#euNew2').value='';
+    const ub=$('#ubig'); if(ub) ub.textContent=a;
     const v={user:a,profile:window.__boundProfile||'',comment:'',price:'-'};
-    $('#euResult').innerHTML=voucherResultCard([v]);
+    $('#euResult').innerHTML=`<div class="notif-ok">✅ Username berhasil diubah dari <b>${esc(lama)}</b> menjadi <b>${esc(a)}</b>. Gunakan username baru ini untuk login berikutnya.</div>`+voucherResultCard([v]);
   }catch(e){ toast(e.message,'err'); } };
 
 /* shared active-detail list (User, Server, Mac, IP, Download, Upload, Total) + search + sort */
@@ -681,6 +684,7 @@ PAGES.peraturan=async function(){
       <div class="item" onclick="openSub('logo')" style="cursor:pointer"><div class="top"><div class="nm">🖼 Logo</div><span style="color:var(--muted)">›</span></div></div>
       <div class="item" onclick="openSub('tema')" style="cursor:pointer"><div class="top"><div class="nm">🎨 Tema Aplikasi</div><span style="color:var(--muted)">›</span></div></div>
       <div class="item" onclick="openSub('pdf')" style="cursor:pointer"><div class="top"><div class="nm">🧾 Template Cetak PDF</div><span style="color:var(--muted)">›</span></div></div>
+      <div class="item" onclick="openSub('rename')" style="cursor:pointer"><div class="top"><div class="nm">📝 Informasi Ganti Username</div><span style="color:var(--muted)">${Store.renameLog.length?Store.renameLog.length:'›'}</span></div></div>
       <div class="item" onclick="clearAdminPass()" style="cursor:pointer"><div class="top"><div class="nm">🔑 Hapus Password Switch</div><span style="color:var(--muted)">${Store.adminOk?'aktif':'—'}</span></div></div>
     </div>
     <div class="card"><div class="sub center">ALHUDA_D.NET · mode langsung ke router · v3.0</div></div>`;
@@ -697,7 +701,17 @@ window.checkPasscode=()=>{ if($('#pcode').value==='zakas11'){ perUnlocked=true; 
 window.clearAdminPass=()=>{ if(!Store.adminOk){ toast('Password belum aktif','');return; } if(!confirmBox('Hapus password switch? Nanti akan diminta password lagi saat beralih ke Beranda.'))return; Store.adminOk=false; toast('Password dihapus','ok'); go('peraturan'); };
 window.openSub=(s)=>{ perSub=s; renderPerSub(s); };
 window.perBack=()=>{ perSub=null; go('peraturan'); };
-function renderPerSub(s){ ({router:subRouter,app:subApp,logo:subLogo,tema:subTema,pdf:subPdf}[s])(); }
+function renderPerSub(s){ ({router:subRouter,app:subApp,logo:subLogo,tema:subTema,pdf:subPdf,rename:subRename}[s])(); }
+function subRename(){ const log=Store.renameLog;
+  const rows=log.length?log.map(x=>{ const d=new Date(x.at||Date.now());
+    const ts=p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+' '+p2(d.getHours())+':'+p2(d.getMinutes());
+    return `<div class="item"><div class="top"><div class="nm">${esc(x.old||'-')} → ${esc(x.neo||'-')}</div></div><div class="meta"><span>${esc(ts)}</span></div></div>`;
+  }).join(''):'<div class="empty">Belum ada perubahan username.</div>';
+  view().innerHTML=subHead('Informasi Ganti Username')+`<div class="card">
+    <div class="note">Catatan setiap kali username/kode voucer diganti dari Halaman Utama.</div>
+    <div class="list">${rows}</div>
+    ${log.length?'<button class="btn dang block mt" onclick="clearRenameLog()">🗑 Hapus Semua Catatan</button>':''}</div>`; }
+window.clearRenameLog=()=>{ if(!confirmBox('Hapus semua catatan ganti username?'))return; Store.renameLog=[]; toast('Dihapus','ok'); subRename(); };
 function subHead(title){ return `<div class="page-title"><span onclick="perBack()" style="cursor:pointer">‹ Peraturan</span> · ${esc(title)}</div>`; }
 
 function subApp(){ view().innerHTML=subHead('Pengaturan Aplikasi')+`<div class="card">

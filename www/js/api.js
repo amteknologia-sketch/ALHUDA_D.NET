@@ -15,6 +15,7 @@ const Store = {
   set routers(v){ localStorage.setItem('ad_routers', JSON.stringify(v)); },
   get boundUser(){ return localStorage.getItem('ad_bound')||''; }, set boundUser(v){ if(v) localStorage.setItem('ad_bound',v); else localStorage.removeItem('ad_bound'); },
   get adminOk(){ return localStorage.getItem('ad_adminok')==='1'; }, set adminOk(v){ if(v) localStorage.setItem('ad_adminok','1'); else localStorage.removeItem('ad_adminok'); },
+  get renameLog(){ try{ return JSON.parse(localStorage.getItem('ad_renamelog')||'[]'); }catch(e){ return []; } }, set renameLog(v){ localStorage.setItem('ad_renamelog', JSON.stringify(v)); },
 };
 
 /* ---------- cache (untuk mode offline / tanpa loading) ---------- */
