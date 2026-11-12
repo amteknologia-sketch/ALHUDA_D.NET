@@ -94,12 +94,15 @@ document.addEventListener('DOMContentLoaded', init);
 let AppMode='utama';
 function setMode(m){ AppMode=m; document.body.setAttribute('data-mode',m); }
 async function init(){
-  document.documentElement.setAttribute('data-theme', Store.theme);
-  applyBranding(); bindChrome();
-  if(!Store.routers.length){ routerUpsert(ROUTER_DEFAULT); Store.session=ROUTER_DEFAULT.name; } // router default tersimpan otomatis
-  await loadSessions();
-  setMode('utama'); renderUtama();
+  try{
+    document.documentElement.setAttribute('data-theme', Store.theme);
+    applyBranding(); bindChrome();
+    if(!Store.routers.length){ routerUpsert(ROUTER_DEFAULT); Store.session=ROUTER_DEFAULT.name; } // router default tersimpan otomatis
+    try{ await loadSessions(); }catch(e){}
+    setMode('utama'); renderUtama();
+  }catch(e){ setMode('utama'); try{ renderUtama(); }catch(_){ view().innerHTML='<div class="card"><div class="empty">⚠️ '+esc(e.message||'Gagal memuat')+'</div><button class="btn pri block" onclick="renderUtama(true)">Coba lagi</button></div>'; } }
 }
+window.addEventListener('unhandledrejection',function(ev){ try{ if(ev&&ev.reason) console.log('unhandled:',ev.reason.message||ev.reason); }catch(_){}} );
 function applyBranding(){ $('#appName').textContent=Store.appName; const img=$('#appLogo'); if(Store.logo){img.src=Store.logo;img.style.display='inline-block';}else{img.style.display='none';} document.title=Store.appName; }
 function bindChrome(){
   $('#refreshBtn').onclick=()=>{ if(AppMode==='utama') renderUtama(true); else go(currentRoute,true); };
@@ -132,7 +135,7 @@ async function loadSessions(){
 ====================================================================== */
 let currentRoute='beranda';
 function setNav(r){ document.querySelectorAll('.tabbar a').forEach(a=>a.classList.toggle('on',a.dataset.route===r)); }
-function errBox(msg){ view().innerHTML=`<div class="card"><div class="empty">⚠️ ${esc(msg)}</div><button class="btn pri block" onclick="go(currentRoute,true)">Coba lagi</button></div>`; }
+function errBox(msg){ const retry=AppMode==='utama'?'renderUtama(true)':'go(currentRoute,true)'; view().innerHTML=`<div class="card"><div class="empty">⚠️ ${esc(msg)}</div><button class="btn pri block" onclick="${retry}">Coba lagi</button></div>`; }
 async function go(route,force){
   currentRoute=route; setNav(route); clearTimers(); closeSheet();
   if(route!=='peraturan' && !Store.routers.length) return go('peraturan');
