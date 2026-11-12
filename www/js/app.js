@@ -96,7 +96,7 @@ function setMode(m){ AppMode=m; document.body.setAttribute('data-mode',m); }
 async function init(){
   document.documentElement.setAttribute('data-theme', Store.theme);
   applyBranding(); bindChrome();
-  if(!Store.routers.length){ setMode('beranda'); go('peraturan'); return; }
+  if(!Store.routers.length){ routerUpsert(ROUTER_DEFAULT); Store.session=ROUTER_DEFAULT.name; } // router default tersimpan otomatis
   await loadSessions();
   setMode('utama'); renderUtama();
 }
